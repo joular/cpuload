@@ -1,0 +1,27 @@
+# Build output
+obj/
+lib/
+tests/obj/
+tests/bin/
+
+# Object file
+*.o
+
+# Ada Library Information
+*.ali
+
+# Alire generated folders
+config/
+alire/
+
+# Editor and OS files
+.vscode/
+.DS_Store
+
+# Built example and test programs
+example/example_cpu_load
+example/c/example_c
+example/c/*.dll
+example/python/*.dll
+example/python/__pycache__
+*.exe

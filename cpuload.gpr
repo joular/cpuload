@@ -1,0 +1,93 @@
+library project CpuLoad is
+
+    --  Windows sets OS=Windows_NT; Linux/macOS/BSD leave it unset
+    type Host_OS_Kind is ("Windows_NT", "other");
+    Host_OS : Host_OS_Kind := external ("OS", "other");
+
+    Default_OS := "linux";
+    case Host_OS is
+        when "Windows_NT"
+            => Default_OS := "windows";
+        when "other"
+            => Default_OS := "linux";
+    end case;
+
+    -- Symbols to indicate which OS to compile for
+    -- Build with: gprbuild -XPJ_OS=windows
+    type OS_Platform is ("linux", "windows"); --, "macos", "bsd");
+    PJ_OS : OS_Platform := external ("PJ_OS", Default_OS);
+
+    -- Default platform directory for each CPU load implementation
+    Platform_Dir := "src/linux";
+
+    case PJ_OS is
+        when "linux" =>
+            Platform_Dir := "src/linux";
+        when "windows" =>
+            Platform_Dir := "src/windows";
+--        when "macos" =>
+--            Platform_Dir := "src/macos";
+--        when "bsd" =>
+--            Platform_Dir := "src/bsd";
+    end case;
+
+    -- Library type
+    -- static : libCPU_Load.a, linked into the client
+    -- relocatable : libCPU_Load.so / .dll / .dylib
+    -- static-pic : archive built position independent, so it can itself be linked into someone else's shared library
+    type Library_Type_Kind is ("static", "relocatable", "static-pic");
+    Library_Type : Library_Type_Kind :=
+        external ("CPULOAD_LIBRARY_TYPE", external ("LIBRARY_TYPE", "static"));
+
+    for Languages use ("Ada");
+    for Library_Name use "CPU_Load";
+    for Source_Dirs use ("src", Platform_Dir);
+    for Object_Dir  use "obj/" & Library_Type;
+    for Library_Dir use "lib/" & Library_Type;
+    for Library_Kind use Library_Type;
+    for Create_Missing_Dirs use "True";
+
+    -- The relocatable (shared) library is stand-alone and encapsulated: it carries the Ada runtime and starts itself up when loaded, so programs in other languages (C, Python, Java, Rust, etc.) can simply load it and call the functions of include/cpuload.h, with nothing else needed
+    case Library_Type is
+        when "relocatable" =>
+            for Library_Interface use ("CPU_Load", "CPU_Load.C_API");
+            for Library_Standalone use "encapsulated";
+--            case PJ_OS is
+--                when "macos" =>
+                    -- gprbuild cannot encapsulate on macOS, so the library loads the Ada runtime from its own file there
+--                    for Library_Standalone use "standard";
+--                when others =>
+--                    for Library_Standalone use "encapsulated";
+--            end case;
+
+            case PJ_OS is
+                when "linux" =>
+                    for Library_Version use "libCPU_Load.so.0";
+                when "windows" =>
+                    -- Linker_Options below is for whoever links against this library, and it comes too late for the library itself: the DLL calls EnumProcesses, so it has to link psapi on its own
+                    for Library_Options use ("-lpsapi");
+            end case;
+
+        when others =>
+            null;
+    end case;
+
+    package Linker is
+        case PJ_OS is
+            when "windows" =>
+                --  EnumProcesses lives in psapi
+                for Linker_Options use ("-lpsapi");
+            when others =>
+                null;
+        end case;
+    end Linker;
+
+    package Compiler is
+        for Switches ("Ada") use ("-O3", "-gnat2012", "-gnatwa");
+    end Compiler;
+
+    package Binder is
+        for Switches ("Ada") use ("-static");
+    end Binder;
+
+end CpuLoad;
