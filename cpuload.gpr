@@ -14,7 +14,7 @@ library project CpuLoad is
 
     -- Symbols to indicate which OS to compile for
     -- Build with: gprbuild -XPJ_OS=windows
-    type OS_Platform is ("linux", "windows"); --, "macos", "bsd");
+    type OS_Platform is ("linux", "windows", "macos"); --, "bsd");
     PJ_OS : OS_Platform := external ("PJ_OS", Default_OS);
 
     -- Default platform directory for each CPU load implementation
@@ -25,8 +25,8 @@ library project CpuLoad is
             Platform_Dir := "src/linux";
         when "windows" =>
             Platform_Dir := "src/windows";
---        when "macos" =>
---            Platform_Dir := "src/macos";
+        when "macos" =>
+            Platform_Dir := "src/macos";
 --        when "bsd" =>
 --            Platform_Dir := "src/bsd";
     end case;
@@ -47,18 +47,18 @@ library project CpuLoad is
     for Library_Kind use Library_Type;
     for Create_Missing_Dirs use "True";
 
-    -- The relocatable (shared) library is stand-alone and encapsulated: it carries the Ada runtime and starts itself up when loaded, so programs in other languages (C, Python, Java, Rust, etc.) can simply load it and call the functions of include/cpuload.h, with nothing else needed
+    -- The relocatable (shared) library is stand-alone: it starts itself up when loaded, so programs in other languages (C, Python, Java, Rust, etc.) can simply load it and call the functions of include/cpuload.h, with nothing else needed
+    -- It is encapsulated as well where it can be, meaning it carries the Ada runtime and is one self-contained file
     case Library_Type is
         when "relocatable" =>
             for Library_Interface use ("CPU_Load", "CPU_Load.C_API");
-            for Library_Standalone use "encapsulated";
---            case PJ_OS is
---                when "macos" =>
+            case PJ_OS is
+                when "macos" =>
                     -- gprbuild cannot encapsulate on macOS, so the library loads the Ada runtime from its own file there
---                    for Library_Standalone use "standard";
---                when others =>
---                    for Library_Standalone use "encapsulated";
---            end case;
+                    for Library_Standalone use "standard";
+                when others =>
+                    for Library_Standalone use "encapsulated";
+            end case;
 
             case PJ_OS is
                 when "linux" =>
@@ -66,6 +66,9 @@ library project CpuLoad is
                 when "windows" =>
                     -- Linker_Options below is for whoever links against this library, and it comes too late for the library itself: the DLL calls EnumProcesses, so it has to link psapi on its own
                     for Library_Options use ("-lpsapi");
+                when "macos" =>
+                    -- Nothing to add: the counters the library reads are in libSystem, which every program links already
+                    null;
             end case;
 
         when others =>

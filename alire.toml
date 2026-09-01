@@ -11,22 +11,25 @@ authors = ["Adel Noureddine"]
 maintainers = ["Adel Noureddine <adel.noureddine@outlook.com>"]
 maintainers-logins = ["adelnoureddine"]
 
-tags = ["cpu", "process", "monitoring", "linux", "windows", "application", "usage", "load"]
+tags = ["cpu", "process", "monitoring", "linux", "windows", "macos", "application", "usage", "load"]
 
 
 licenses = "LGPL-3.0-only"
 website = "https://www.noureddine.org/research/joular"
 
 [gpr-externals]
-PJ_OS = ["linux", "windows"]
+PJ_OS = ["linux", "windows", "macos"]
 CPULOAD_LIBRARY_TYPE = ["static", "relocatable", "static-pic"]
 
 [gpr-set-externals."case(os)".linux]
 PJ_OS = "linux"
 [gpr-set-externals."case(os)".windows]
 PJ_OS = "windows"
+[gpr-set-externals."case(os)".macos]
+PJ_OS = "macos"
 
 [available.'case(os)']
 linux = true
 windows = true
+macos = true
 '...' = false

@@ -13,7 +13,7 @@
 --     the system CPU usage
 --     a specific process CPU usage
 --     an application CPU usage (including all its processes, tracked on creation/destruction)
--- CPU Load works on Linux and Windows, and is thread-safe
+-- CPU Load works on Linux, macOS and Windows, and is thread-safe
 -- How to use it: take a sample, wait, take another sample, calculate CPU load
 --     Before := Take ("firefox");
 --     delay 1.0;
@@ -47,6 +47,7 @@ package CPU_Load is
 
     -- Take a sample of an application (all of its PIDs)
     -- On Linux, application name is case-insensitive but with exact match
+    -- On macOS, also case-insensitive with exact match, on the name of the program itself, so "firefox" matches the firefox inside Firefox.app
     -- On Windows, also, the trailing ".exe" is ignored (so "firefox" will also match "firefox.exe")
     -- An empty string means taking a sample reading of the entire system only
     function Take (App : in String) return Sample;
