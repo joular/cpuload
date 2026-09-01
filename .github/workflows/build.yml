@@ -1,0 +1,44 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # Alire brings the GNAT toolchain, and picks PJ_OS for the system it runs on
+      - uses: alire-project/setup-alire@v6
+
+      - name: Build the static library
+        run: alr --non-interactive build
+
+      - name: Build the relocatable (shared) library
+        run: alr exec -- gprbuild -P cpuload.gpr -XCPULOAD_LIBRARY_TYPE=relocatable -p
+
+      - name: Build the Ada example
+        run: alr exec -- gprbuild -P example/example.gpr -p
+
+      - name: Build the C example (Linux and macOS)
+        if: runner.os != 'Windows'
+        run: alr exec -- make -C example/c
+
+      - name: Build the C example (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          # make is not installed on the Windows runner, unlike gcc
+          # The Makefile runs its commands in cmd, so the default PowerShell shell of the runner is fine
+          choco install make --no-progress -y
+          alr exec -- make -C example/c
+
+      # The Python example is not compiled, ctypes calls the shared library directly, so this only builds the library it loads and puts it where the example looks
+      # make is on every runner by this point, the Windows step above having installed it
+      - name: Build the library the Python example loads
+        run: alr exec -- make -C example/python
