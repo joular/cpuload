@@ -13,13 +13,17 @@ The library is thread-safe, written in Ada, and also provides a [C interface](in
 | What is measured | OS | Method |
 |---|---|---|
 | The whole system | Linux | The `cpu` line of `/proc/stat` |
+| The whole system | macOS | `host_statistics`, the machine's own CPU counters |
 | The whole system | Windows | `GetSystemTimes` |
 | One process, by its number | Linux | `utime` + `stime` of `/proc/<pid>/stat` |
+| One process, by its number | macOS | `proc_pidinfo`, the user and system time of the process |
 | One process, by its number | Windows | `OpenProcess` + `GetProcessTimes` |
 | An application, every process of it | Linux | `/proc` scanned, each process named by `/proc/<pid>/comm` |
+| An application, every process of it | macOS | `proc_listpids`, each process named by `proc_pidpath` |
 | An application, every process of it | Windows | `EnumProcesses` + `QueryFullProcessImageNameW` |
 
-macOS and BSD support is planned and will come in a future version.
+macOS is supported on Apple Silicon.
+BSD support is planned and will come in a future version.
 
 ## Building
 
@@ -32,18 +36,23 @@ alr build
 Or directly with GNAT:
 
 ```bash
-gprbuild -P cpuload.gpr
+gprbuild -P cpuload.gpr -XPJ_OS=macos
 ```
 
-The build produces a static library by default, and will detect the OS to compile the appropriate version. You can specify a specific OS to compile with `-XPJ_OS` (ex. `-XPJ_OS=windows`) to gprbuild (Alire sets it on its own).
+The build produces a static library by default. `-XPJ_OS` says which system to build for: `linux`, `macos` or `windows`. Windows is the only one recognised on its own, as nothing tells macOS from Linux at build time, so **pass `-XPJ_OS` yourself on the other two**. Alire sets it on its own, and so do the Makefiles of the examples, which ask `uname`. A library built for another system reads no counters at all and reports 0% for everything.
 
 For other library types (shared, etc.), set `-XCPULOAD_LIBRARY_TYPE`:
 
 ```bash
-gprbuild -P cpuload.gpr -XCPULOAD_LIBRARY_TYPE=relocatable
+gprbuild -P cpuload.gpr -XPJ_OS=macos -XCPULOAD_LIBRARY_TYPE=relocatable
 ```
 
-`relocatable` builds the shared library (`libCPU_Load.so` / `.dll`) that carries the C interface, is standalone (it starts itself up when loaded), and is encapsulated (it carries the Ada runtime too, so it is one self-contained file).
+`relocatable` builds the shared library (`libCPU_Load.so` / `.dll` / `.dylib`) that carries the C interface and is standalone: it starts itself up when loaded. On Linux and Windows it is encapsulated as well, carrying the Ada runtime with it, so it is one self-contained file.
+gprbuild cannot encapsulate on macOS, so the library reads the Ada runtime from its own file there, and looks for it next to itself. Copy it in once the library is built (the Makefiles of the examples do this for you):
+
+```bash
+cp "$(gnatls -v | grep adalib | tr -d ' ')"/libgnat-*.dylib lib/relocatable/
+```
 
 ## Using from Ada
 
@@ -75,9 +84,11 @@ The whole interface is five functions: `Sample`, the three `Take` functions (the
 A full example program is in [example/src/example_cpu_load.adb](example/src/example_cpu_load.adb). It follows the machine, itself, and an application named on the command line, once per second until stopped with Ctrl+C:
 
 ```bash
-gprbuild -P example/example.gpr -p
+gprbuild -P example/example.gpr -XPJ_OS=macos -p
 ./example/example_cpu_load firefox
 ```
+
+Give `-XPJ_OS` here too: the example builds the library with it, and one built for another system reads no counters at all and reports 0% for everything.
 
 With Alire, add the library to your project with `alr with cpuload`.
 
@@ -107,7 +118,7 @@ make -C example/c run APP=firefox
 To build it by hand instead, from the root of the repository, first compile the library:
 
 ```bash
-gprbuild -P cpuload.gpr -XCPULOAD_LIBRARY_TYPE=relocatable
+gprbuild -P cpuload.gpr -XPJ_OS=macos -XCPULOAD_LIBRARY_TYPE=relocatable
 ```
 
 Then compile the C program:
@@ -116,7 +127,7 @@ Then compile the C program:
 gcc example/c/main.c -Iinclude -Llib/relocatable -lCPU_Load -Wl,-rpath,"$PWD/lib/relocatable" -o example/c/example_c
 ```
 
-`-I` is the folder holding `cpuload.h`, `-L` and `-l` the library to link with, and `-rpath` the folder where the program looks for the library when it runs. Without `-rpath`, the program still compiles but stops on start with a "library not loaded" error, unless you set `LD_LIBRARY_PATH` yourself. Windows has no `-rpath`: put a copy of the DLL next to the program instead (which is what the Makefile does).
+`-I` is the folder holding `cpuload.h`, `-L` and `-l` the library to link with, and `-rpath` the folder where the program looks for the library when it runs. Without `-rpath`, the program still compiles but stops on start with a "library not loaded" error, unless you set `LD_LIBRARY_PATH` yourself. macOS works the same way, as long as the Ada runtime sits next to the library as above. Windows has no `-rpath`: put a copy of the DLL next to the program instead (which is what the Makefile does).
 
 ## Using from Python
 
@@ -128,7 +139,7 @@ import ctypes, time
 class Sample(ctypes.Structure):
     _fields_ = [("busy", ctypes.c_int64), ("total", ctypes.c_int64), ("used", ctypes.c_int64)]
 
-lib = ctypes.CDLL("lib/relocatable/libCPU_Load.so")
+lib = ctypes.CDLL("lib/relocatable/libCPU_Load.so")  # libCPU_Load.dylib on macOS, CPU_Load.dll on Windows
 lib.cpuload_system_usage.restype = ctypes.c_double
 lib.cpuload_process_usage.restype = ctypes.c_double
 lib.cpuload_version.restype = ctypes.c_char_p
@@ -149,7 +160,7 @@ Java (through FFM or JNA), Rust (through `libloading` or FFI declarations), and 
 
 ## Adding a new OS
 
-The package spec [src/cpu_load.ads](src/cpu_load.ads) is shared by every OS, and holds the two usage functions, which are pure arithmetic on a pair of samples. Each OS brings its own body of the three `Take` functions ([src/linux](src/linux/cpu_load.adb), [src/windows](src/windows/cpu_load.adb)), and [cpuload.gpr](cpuload.gpr) picks the folder for the OS being built from the `PJ_OS` symbol. To support a new OS, write the implementation body and add its folder there.
+The package spec [src/cpu_load.ads](src/cpu_load.ads) is shared by every OS, and holds the usage functions. Each OS brings its own body of the three `Take` functions ([src/linux](src/linux/cpu_load.adb), [src/macos](src/macos/cpu_load.adb), [src/windows](src/windows/cpu_load.adb)), and [cpuload.gpr](cpuload.gpr) picks the folder for the OS being built from the `PJ_OS` symbol. To support a new OS, write the implementation body and add its folder there.
 
 ## 📜 License
 

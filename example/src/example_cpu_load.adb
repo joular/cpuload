@@ -11,8 +11,8 @@
 
 --  Prints the CPU load of the machine, of this very program, and of an application named on the command line, every second, until stopped with Ctrl+C
 --
---  Build and run it with:
---    gprbuild -P example/example.gpr -p
+--  Build and run it with (-XPJ_OS says which system to build for: linux, macos or windows):
+--    gprbuild -P example/example.gpr -XPJ_OS=macos -p
 --    ./example/example_cpu_load firefox
 
 with Ada.Command_Line; use Ada.Command_Line;
@@ -24,6 +24,10 @@ with GNAT.OS_Lib;
 with System.Multiprocessors;
 
 with CPU_Load; use CPU_Load;
+
+--  A Sample's counters are Integer_64, so comparing one needs its operators here
+with Interfaces;
+use type Interfaces.Integer_64;
 
 procedure Example_CPU_Load is
 
@@ -52,6 +56,7 @@ procedure Example_CPU_Load is
     Mine_Colour : constant String := Escape & "[1;35m";
     App_Colour : constant String := Escape & "[1;33m";
     Ready_Colour : constant String := Escape & "[1;32m";
+    Trouble_Colour : constant String := Escape & "[1;31m";
 
     --  Goes back to the beginning of the line and erases it, so each reading overwrites the previous one instead of scrolling
     Clear_Line : constant String := ASCII.CR & Escape & "[2K";
@@ -115,6 +120,16 @@ begin
     Machine_Before := Take;
     Mine_Before := Take (Ours);
     App_Before := Take (App);
+
+    --  A Total of zero is the library saying it could not read the machine's counters at all
+    --  It is what a library built for another system does here, and it would otherwise show as a row of 0% every second, which looks like an idle machine rather than a build to redo
+    if Machine_Before.Total = 0 then
+        Put_Line (Trouble_Colour
+                  & "The machine's counters could not be read at all."
+                  & " This is what a library built for another system does: build it again with -XPJ_OS for this one (linux, macos or windows)."
+                  & Reset);
+        return;
+    end if;
 
     while not Stop_Asked loop
         delay Interval;

@@ -1,4 +1,4 @@
-# Builds the shared library the Python example of CPU Load needs, on Linux and Windows
+# Builds the shared library the Python example of CPU Load needs, on Linux, macOS and Windows
 #
 #   make          builds the shared library
 #   make run      builds it, then runs the example (stop it with Ctrl+C)
@@ -31,16 +31,25 @@ ifeq ($(OS),Windows_NT)
 
 else
 
-    # CPU Load has a body for Linux and for Windows only
+    # Nothing but Windows sets OS, so ask uname which of the others this is
     ifeq ($(shell uname),Darwin)
-        $(error CPU Load has no macOS implementation yet, so build this on Linux or Windows)
+
+        PJ_OS = macos
+
+        # gprbuild cannot put the Ada runtime inside the library on macOS, and the library looks for it next to itself, so put a copy there
+        ADALIB = $(shell gnatls -v | grep adalib | head -1 | tr -d ' ')
+        COPY_LIBRARY = cp -f $(ADALIB)/libgnat-*.dylib $(LIB_DIR)
+
+    else
+
+        PJ_OS = linux
+
+        # Linux records the folder of the Ada runtime inside the library, so nothing to copy
+        COPY_LIBRARY = true
+
     endif
 
-    PJ_OS = linux
     PYTHON = python3
-
-    # Linux records the folder of the Ada runtime inside the library, so nothing to copy
-    COPY_LIBRARY = true
 
     CLEAN = rm -f *.dll && rm -rf __pycache__
 

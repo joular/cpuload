@@ -60,14 +60,13 @@ def library_names():
     """The name the shared library takes on this OS."""
     if sys.platform == "win32":
         return ("libCPU_Load.dll", "CPU_Load.dll")
+    if sys.platform == "darwin":
+        return ("libCPU_Load.dylib",)
     return ("libCPU_Load.so",)
 
 
 def find_library():
     """The file holding the shared library, or a message on how to build it when there is none."""
-    if sys.platform == "darwin":
-        sys.exit("CPU Load has no macOS implementation yet, so run this on Linux or Windows")
-
     # Look next to this program first, as Windows has no rpath and wants a copy
     # of the DLL there, then in the folder gprbuild builds the library into
     for folder in (Path(__file__).resolve().parent, LIBRARY_DIR):

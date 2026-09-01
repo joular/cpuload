@@ -12,7 +12,7 @@
 /*
  * C interface of CPU Load, a library reporting how much of a machine's CPU is in use: the whole system, one process by its number, or an application, meaning every process running it
  *
- * Use it with the relocatable (shared) build of the library (libCPU_Load.so on Linux, CPU_Load.dll on Windows), which starts itself up when loaded: no other initialization call is needed
+ * Use it with the relocatable (shared) build of the library (libCPU_Load.so on Linux, libCPU_Load.dylib on macOS, CPU_Load.dll on Windows), which starts itself up when loaded: no other initialization call is needed
  *
  * Library is thread-safe
  *
@@ -50,6 +50,7 @@ void cpuload_take_pid(unsigned int pid, cpuload_sample *out);
 
 /* Take a sample of the system and of every process running the named application
  * The name is the program's own, without its folder, and it is exactly matched and case insensitive, so "firefox" finds "Firefox"
+ * On macOS the program's own name is matched the same way, so "firefox" finds the firefox inside Firefox.app
  * On Windows a trailing ".exe" is ignored as well, so "firefox" also finds "firefox.exe"
 */
 void cpuload_take_app(const char *app, cpuload_sample *out);
