@@ -82,7 +82,7 @@ package CPU_Load is
     function Version return String is
         (
             -- Keep it the same as the version in alire.toml
-            "0.0.1"
+            "0.0.2"
         );
 
 end CPU_Load;
