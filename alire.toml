@@ -25,3 +25,8 @@ CPULOAD_LIBRARY_TYPE = ["static", "relocatable", "static-pic"]
 PJ_OS = "linux"
 [gpr-set-externals."case(os)".windows]
 PJ_OS = "windows"
+
+[available.'case(os)']
+linux = true
+windows = true
+'...' = false
