@@ -17,6 +17,10 @@ package body CPU_Load.C_API is
     -- The version as a C string (a NUL terminated array of C chars), built once here
     Version_C : aliased constant Interfaces.C.char_array := Interfaces.C.To_C (Version);
 
+    -- The longest application name read from C
+    -- No program is named anywhere near this long, and it keeps a pointer to something that is not a string from being walked over until it happens on a NUL
+    Max_App_Name : constant Interfaces.C.size_t := 4_096;
+
     --------------------------------------------------
 
     -- Translate one sample to its C form
@@ -31,6 +35,18 @@ package body CPU_Load.C_API is
         ((Busy => Item.Busy,
           Total => Item.Total,
           Used => Item.Used));
+
+    -- The machine's counters as they were handed over from C
+    -- A NULL pointer is no reading at all, which is a sample of zeros: the two usage functions answer 0.0 for one of those
+    function Machine_Of (Machine : access constant C_Sample) return Sample is
+        (if Machine = null then (others => 0) else From_C (Machine.all));
+
+    -- The name of the application as it was handed over from C
+    -- A NULL pointer is no name at all, which is a sample of the machine alone
+    function App_Of (App : in Interfaces.C.Strings.chars_ptr) return String is
+        (if App = Interfaces.C.Strings.Null_Ptr
+         then ""
+         else Interfaces.C.Strings.Value (App, Max_App_Name));
 
     --------------------------------------------------
 
@@ -82,16 +98,55 @@ package body CPU_Load.C_API is
 
         Result.all := (others => 0);
 
-        -- A NULL pointer is no name at all, which is a sample of the system alone
-        if App = Interfaces.C.Strings.Null_Ptr then
-            Result.all := To_C (Take);
-        else
-            Result.all := To_C (Take (Interfaces.C.Strings.Value (App)));
-        end if;
+        Result.all := To_C (Take (App_Of (App)));
     exception
         when others =>
             null;
     end C_Take_App;
+
+    --------------------------------------------------
+
+    procedure C_Take_PID_With (PID : in Interfaces.C.unsigned;
+                               Machine : access constant C_Sample;
+                               Result : access C_Sample) is
+    begin
+        if Result = null then
+            return;
+        end if;
+
+        Result.all := (others => 0);
+
+        -- A C unsigned holds numbers an Ada Process_ID does not, and no such number is a process
+        -- PID 0 is none either, so it gives back the machine's reading alone
+        if PID > Interfaces.C.unsigned (Process_ID'Last) then
+            Result.all := To_C (Take (PID => 0, Machine => Machine_Of (Machine)));
+        else
+            Result.all := To_C (Take (PID => Process_ID (PID),
+                                      Machine => Machine_Of (Machine)));
+        end if;
+    exception
+        when others =>
+            null;
+    end C_Take_PID_With;
+
+    --------------------------------------------------
+
+    procedure C_Take_App_With (App : in Interfaces.C.Strings.chars_ptr;
+                               Machine : access constant C_Sample;
+                               Result : access C_Sample) is
+    begin
+        if Result = null then
+            return;
+        end if;
+
+        Result.all := (others => 0);
+
+        Result.all := To_C (Take (App => App_Of (App),
+                                  Machine => Machine_Of (Machine)));
+    exception
+        when others =>
+            null;
+    end C_Take_App_With;
 
     --------------------------------------------------
 

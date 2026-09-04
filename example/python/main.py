@@ -105,6 +105,16 @@ def load_library():
     library.cpuload_take_app.argtypes = [ctypes.c_char_p, ctypes.POINTER(Sample)]
     library.cpuload_take_app.restype = None
 
+    library.cpuload_take_pid_with.argtypes = [ctypes.c_uint,
+                                              ctypes.POINTER(Sample),
+                                              ctypes.POINTER(Sample)]
+    library.cpuload_take_pid_with.restype = None
+
+    library.cpuload_take_app_with.argtypes = [ctypes.c_char_p,
+                                              ctypes.POINTER(Sample),
+                                              ctypes.POINTER(Sample)]
+    library.cpuload_take_app_with.restype = None
+
     library.cpuload_system_usage.argtypes = [ctypes.POINTER(Sample), ctypes.POINTER(Sample)]
     library.cpuload_system_usage.restype = ctypes.c_double
 
@@ -134,7 +144,8 @@ def main():
 
     ours = os.getpid()
 
-    # Each thing followed keeps its own pair of samples, so each is measured over exactly the stretch of time between its own two
+    # The machine is read once per reading, and the other two are measured against that one reading
+    # Each of the three is then measured over exactly the same stretch of time, and the machine's counters are read once a second rather than three times
     machine_before, machine_after = Sample(), Sample()
     mine_before, mine_after = Sample(), Sample()
     app_before, app_after = Sample(), Sample()
@@ -153,16 +164,23 @@ def main():
 
     # The first sample of each, which the first reading below is measured against
     library.cpuload_take_system(ctypes.byref(machine_before))
-    library.cpuload_take_pid(ours, ctypes.byref(mine_before))
-    library.cpuload_take_app(app, ctypes.byref(app_before))
+    library.cpuload_take_pid_with(ours, ctypes.byref(machine_before), ctypes.byref(mine_before))
+    library.cpuload_take_app_with(app, ctypes.byref(machine_before), ctypes.byref(app_before))
+
+    # A total of zero is the library saying it could not read the machine's counters at all
+    # It is what a library built for another system does here, and it would otherwise show as a row of 0% every second, which looks like an idle machine rather than a build to redo
+    if machine_before.total == 0:
+        sys.exit("The machine's counters could not be read at all."
+                 " This is what a library built for another system does:"
+                 " build it again with -XPJ_OS for this one (linux, macos or windows).")
 
     try:
         while True:
             time.sleep(INTERVAL)
 
             library.cpuload_take_system(ctypes.byref(machine_after))
-            library.cpuload_take_pid(ours, ctypes.byref(mine_after))
-            library.cpuload_take_app(app, ctypes.byref(app_after))
+            library.cpuload_take_pid_with(ours, ctypes.byref(machine_after), ctypes.byref(mine_after))
+            library.cpuload_take_app_with(app, ctypes.byref(machine_after), ctypes.byref(app_after))
 
             line = [load_text("machine", library.cpuload_system_usage(
                         ctypes.byref(machine_before), ctypes.byref(machine_after))),

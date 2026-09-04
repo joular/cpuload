@@ -46,11 +46,20 @@ package CPU_Load is
     function Take (PID : in Process_ID) return Sample;
 
     -- Take a sample of an application (all of its PIDs)
-    -- On Linux, application name is case-insensitive but with exact match
-    -- On macOS, also case-insensitive with exact match, on the name of the program itself, so "firefox" matches the firefox inside Firefox.app
+    -- The application is named by its program, without the folders leading to it, matched exactly and without regard to case
+    -- On Linux, the program the process runs, so "firefox" matches every process of Firefox, its content processes included
+    -- On macOS, the same, on the name of the program itself, so "firefox" matches the firefox inside Firefox.app
     -- On Windows, also, the trailing ".exe" is ignored (so "firefox" will also match "firefox.exe")
     -- An empty string means taking a sample reading of the entire system only
     function Take (App : in String) return Sample;
+
+    -- The same two, but against a machine sample already taken instead of taking another one
+    -- Several things are then measured over exactly the same stretch of time, and the machine's counters are read once instead of once per thing
+    --     Machine := Take;
+    --     Ours := Take (Our_PID, Machine);
+    --     Theirs := Take ("firefox", Machine);
+    function Take (PID : in Process_ID; Machine : in Sample) return Sample;
+    function Take (App : in String; Machine : in Sample) return Sample;
 
     -- Calculate the CPU load of the entire system (for any sample taken, PID, entire system or application)
     function System_Usage (Before, After : in Sample) return Long_Float is
@@ -82,7 +91,7 @@ package CPU_Load is
     function Version return String is
         (
             -- Keep it the same as the version in alire.toml
-            "0.0.2"
+            "0.0.3"
         );
 
 end CPU_Load;

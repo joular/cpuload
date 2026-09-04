@@ -12,14 +12,19 @@
 with Interfaces.C;
 with System;
 with Ada.Characters.Handling;
+with Ada.Unchecked_Deallocation;
 with GNAT.Directory_Operations;
 
-package body CPU_Load is
+package body CPU_Load.Platform is
 
     -- Variables for macOS types
     subtype Mach_Port is Interfaces.C.unsigned; -- The port
     subtype Kern_Return is Interfaces.C.int; -- What a machine call answers, zero when it worked
-    subtype Counter is Interfaces.C.unsigned; -- The 32 bits numbers the machine counts its time in
+
+    -- The 32 bits numbers the machine counts its time in
+    -- Being only 32 bits, they come back round to zero after some weeks of the machine running: a hundred of them a second for every core, so about fifty days on ten cores and twenty on twenty-four
+    -- One reading then comes out at 0%, the guards in System_Usage and Process_Usage catching a total that went backwards, and the reading after it is right again
+    subtype Counter is Interfaces.C.unsigned;
 
     Kern_Success : constant Kern_Return := 0;
 
@@ -31,13 +36,21 @@ package body CPU_Load is
     Task_Times_Wanted : constant Interfaces.C.int := 4; -- One process's CPU counters
     All_Processes : constant Interfaces.C.unsigned := 1; -- Every process running
 
+    -- How many processes one list holds, and how many the largest one ever asked for holds
+    -- The first is taken on the stack and is what every machine of a usual size takes; the second is only reached by a machine running more processes than that, and is taken off the heap
     Room_For : constant := 4096;
+    Max_Processes : constant := 65_536;
+
     Bytes_Per_Number : constant := Interfaces.C.int'Size / 8;
 
-    -- The machine refuses to write a program's path into any smaller buffer
-    Path_Max : constant := 1_024;
+    -- The machine refuses to write a program's path into any smaller buffer, and writes no longer one than this
+    Path_Max : constant := 4_096;
 
     type Number_Array is array (Positive range <>) of aliased Interfaces.C.int;
+    type Number_Array_Access is access Number_Array;
+
+    procedure Free is
+        new Ada.Unchecked_Deallocation (Number_Array, Number_Array_Access);
 
     -- The machine's four counters, in the order it fills them
     -- Each is counted once per CPU core, so a machine of twelve cores counts twelve seconds of time per second
@@ -45,8 +58,9 @@ package body CPU_Load is
     type CPU_Ticks is array (CPU_State) of Counter with Convention => C;
 
     -- macOS needs this as 16 bytes (four numbers of 32 bits)
+    -- 'Object_Size and not 'Size: what is asked here is how much room the array actually takes, padding and all, which is what the machine writes into
     pragma Compile_Time_Error
-        (CPU_Ticks'Size /= 128, "host_cpu_load_info must be exactly 16 bytes");
+        (CPU_Ticks'Object_Size /= 128, "host_cpu_load_info must be exactly 16 bytes");
 
     -- A tick is a hundredth of a second (the hz of kern.clockrate, which is 100 on macOS)
     -- A process is counted in another unit altogether, so both are turned into nanoseconds here and the two can then be compared
@@ -68,9 +82,9 @@ package body CPU_Load is
 
     -- macOS needs this as 96 bytes
     pragma Compile_Time_Error
-        (Task_Times'Size /= 96 * 8, "proc_taskinfo must be exactly 96 bytes");
+        (Task_Times'Object_Size /= 96 * 8, "proc_taskinfo must be exactly 96 bytes");
 
-    Task_Times_Bytes : constant Interfaces.C.int := Task_Times'Size / 8;
+    Task_Times_Bytes : constant Interfaces.C.int := Task_Times'Object_Size / 8;
 
     -- How the machine's own time units turn into nanoseconds: multiply by the first, divide by the second
     type Timebase is
@@ -152,7 +166,8 @@ package body CPU_Load is
         use Ada.Characters.Handling;
 
         -- The path of the program, ex. /Applications/Firefox.app/Contents/MacOS/firefox
-        Buffer : String (1 .. Path_Max) := (others => ' ');
+        -- Left as it comes: the machine fills it, and only as much of it as the machine says it filled is ever read
+        Buffer : String (1 .. Path_Max);
         Filled : Interfaces.C.int;
     begin
         Filled := Proc_Path (PID => Interfaces.C.int (PID),
@@ -199,6 +214,75 @@ package body CPU_Load is
 
     --------------------------------------------------
 
+    -- Add up the CPU time of every process of the application, out of the Count process numbers the machine listed
+    function Sum_Named (Numbers : in Number_Array;
+                        Count : in Natural;
+                        App_Name : in String) return Integer_64 is
+        Result : Integer_64 := 0;
+    begin
+        for Walked in Numbers'First .. Numbers'First + Count - 1 loop
+            -- Number 0 is the machine's own kernel, and a negative one is no process at all
+            -- Nothing is checked above: macOS counts its processes in the very numbers a Process_ID holds
+            -- Asking the name first is what keeps this cheap: a process that is not the one wanted is never asked for its times
+            if Numbers (Walked) > 0
+               and then Program_Of (Process_ID (Numbers (Walked))) = App_Name
+            then
+                Result := Result + Ticks_Of_PID (Process_ID (Numbers (Walked)));
+            end if;
+        end loop;
+
+        return Result;
+    end Sum_Named;
+
+    --------------------------------------------------
+
+    -- The same, for a machine running more processes than a list on the stack holds
+    -- Only reached when the list came back filled to the brim, which is the machine saying there may be more of them, and which no machine of a usual size ever does
+    -- The list is taken twice as large until it comes back with room to spare, and off the heap, being too large for the stack by then
+    function Used_By_Many (App_Name : in String) return Integer_64 is
+        Capacity : Natural := Room_For * 2;
+        Numbers : Number_Array_Access;
+        Filled : Interfaces.C.int;
+        Room : Interfaces.C.int;
+        Result : Integer_64 := 0;
+    begin
+        loop
+            Numbers := new Number_Array (1 .. Capacity);
+            Room := Interfaces.C.int (Capacity * Bytes_Per_Number);
+
+            Filled := List_Processes (Kind => All_Processes,
+                                      Unused => 0,
+                                      Buffer => Numbers.all (1)'Address,
+                                      Room => Room);
+
+            if Filled <= 0 then
+                Free (Numbers);
+                return 0;
+            end if;
+
+            -- Room to spare, or as large a list as this will ever ask for: count what came back
+            if Filled < Room or else Capacity >= Max_Processes then
+                Result := Sum_Named (Numbers.all,
+                                     Natural (Filled) / Bytes_Per_Number,
+                                     App_Name);
+                Free (Numbers);
+                return Result;
+            end if;
+
+            -- Still full, so ask again with twice the room
+            Free (Numbers);
+            Capacity := Capacity * 2;
+        end loop;
+    exception
+        when others =>
+            -- Nothing is left behind, whatever went wrong above
+            -- Free does nothing at all when there is nothing left to free
+            Free (Numbers);
+            return 0;
+    end Used_By_Many;
+
+    --------------------------------------------------
+
     -- Measure CPU time of the entire system
     function Measure_System return Sample is
         -- The machine's counters, ex. 561652 323108 6266574 0
@@ -233,67 +317,37 @@ package body CPU_Load is
 
     --------------------------------------------------
 
-    function Take return Sample is (Measure_System);
-
-    --------------------------------------------------
-
-    function Take (PID : in Process_ID) return Sample is
-        Result : Sample := Measure_System;
-    begin
-        if PID = 0 then
-            -- No PID, so return system CPU load
-            return Result;
-        else
-            Result.Used := Ticks_Of_PID (PID);
-            return Result;
-        end if;
-    end Take;
-
-    --------------------------------------------------
-
-    function Take (App : in String) return Sample is
+    function Used_By_App (App : in String) return Integer_64 is
         use Ada.Characters.Handling;
-
-        Result : Sample := Measure_System;
 
         -- App name in lower case, so we can be case insensitive
         App_Name : constant String := To_Lower (App);
 
-        Numbers : Number_Array (1 .. Room_For) := (others => 0);
+        -- The list every machine of a usual size fits in, taken on the stack
+        -- Left as it comes: the machine fills it, and only as much of it as the machine says it filled is ever read
+        Numbers : Number_Array (1 .. Room_For);
         Filled : Interfaces.C.int;
-        Counted : Natural;
+        Room : constant Interfaces.C.int := Room_For * Bytes_Per_Number;
     begin
-        -- No app name, so return system CPU load
-        if App = "" then
-            return Result;
-        end if;
-
         Filled := List_Processes (Kind => All_Processes,
                                   Unused => 0,
                                   Buffer => Numbers'Address,
-                                  Room => Room_For * Bytes_Per_Number);
+                                  Room => Room);
 
         if Filled <= 0 then
-            return Result;
+            return 0;
         end if;
 
-        Counted := Natural'Min (Natural (Filled) / Bytes_Per_Number, Room_For);
+        -- A list filled to the brim is the machine saying there may be more processes than fit in it
+        -- Anything short of that is all of them
+        if Filled = Room then
+            return Used_By_Many (App_Name);
+        end if;
 
-        for Walked in 1 .. Counted loop
-            -- Number 0 is the machine's own kernel, and a negative one is no process at all
-            -- Nothing is checked above: macOS counts its processes in the very numbers a Process_ID holds
-            if Numbers (Walked) > 0 then
-                -- Asking the name first is what keeps this cheap: a process that is not the one wanted is never asked for its times
-                if Program_Of (Process_ID (Numbers (Walked))) = App_Name then
-                    Result.Used := Result.Used + Ticks_Of_PID (Process_ID (Numbers (Walked)));
-                end if;
-            end if;
-        end loop;
-
-        return Result;
+        return Sum_Named (Numbers, Natural (Filled) / Bytes_Per_Number, App_Name);
     exception
         when others =>
-            return Result;
-    end Take;
+            return 0;
+    end Used_By_App;
 
-end CPU_Load;
+end CPU_Load.Platform;

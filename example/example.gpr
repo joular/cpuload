@@ -10,7 +10,7 @@ project Example is
     for Create_Missing_Dirs use "True";
 
     package Compiler is
-        for Switches ("Ada") use ("-O3", "-gnat2012", "-gnatwa");
+        for Switches ("Ada") use ("-O2", "-gnat2012", "-gnatwa");
     end Compiler;
 
     package Binder is

@@ -18,11 +18,16 @@ The library is thread-safe, written in Ada, and also provides a [C interface](in
 | One process, by its number | Linux | `utime` + `stime` of `/proc/<pid>/stat` |
 | One process, by its number | macOS | `proc_pidinfo`, the user and system time of the process |
 | One process, by its number | Windows | `OpenProcess` + `GetProcessTimes` |
-| An application, every process of it | Linux | `/proc` scanned, each process named by `/proc/<pid>/comm` |
+| An application, every process of it | Linux | `/proc` scanned, each process named by `/proc/<pid>/exe` |
 | An application, every process of it | macOS | `proc_listpids`, each process named by `proc_pidpath` |
 | An application, every process of it | Windows | `EnumProcesses` + `QueryFullProcessImageNameW` |
 
+Every OS matches the program the process actually runs, so `firefox` finds every process of Firefox, its content processes included. On macOS that is the program inside the bundle, so `firefox` finds the firefox inside `Firefox.app`. On Windows a trailing `.exe` is ignored, so `firefox` also finds `firefox.exe`.
+
+On Linux, a process whose `/proc/<pid>/exe` cannot be read (such as a kernel thread, which runs no program of its own, or another user's process) falls back on `/proc/<pid>/comm`. That one is the name the process gave itself rather than the name of its program (with a max size of 15 character), so such a process may go unmatched where its program name is longer than that or was changed while it ran.
+
 macOS is supported on Apple Silicon.
+
 BSD support is planned and will come in a future version.
 
 ## Building
@@ -79,7 +84,15 @@ begin
 end Measure;
 ```
 
-The whole interface is five functions: `Sample`, the three `Take` functions (the system alone, one `Process_ID`, or an application by name), and the two functions that compare a pair of samples.
+The whole interface is `Sample`, the three `Take` functions (the system alone, one `Process_ID`, or an application by name), the two that measure one thing against a machine sample already taken, and the two that compare a pair of samples.
+
+To follow several things at once, read the machine once and measure each of them against that one reading. Each is then measured over exactly the same period of time, and the machine's counters are read once instead of once per thing:
+
+```ada
+Machine := Take;
+Ours := Take (Our_PID, Machine);
+Theirs := Take ("firefox", Machine);
+```
 
 A full example program is in [example/src/example_cpu_load.adb](example/src/example_cpu_load.adb). It follows the machine, itself, and an application named on the command line, once per second until stopped with Ctrl+C:
 
@@ -107,6 +120,16 @@ cpuload_take_app("firefox", &after);
 
 printf("machine: %.2f%%\n", 100.0 * cpuload_system_usage(&before, &after));
 printf("firefox: %.2f%%\n", 100.0 * cpuload_process_usage(&before, &after));
+```
+
+`cpuload_take_pid_with` and `cpuload_take_app_with` are the same as `cpuload_take_pid` and `cpuload_take_app`, but measure against a machine sample already taken instead of taking another one:
+
+```c
+cpuload_sample machine, mine, theirs;
+
+cpuload_take_system(&machine);
+cpuload_take_pid_with(getpid(), &machine, &mine);
+cpuload_take_app_with("firefox", &machine, &theirs);
 ```
 
 A full example program is in [example/c/main.c](example/c/main.c). Like the Ada one, it follows the machine, itself, and an application named on the command line, once per second until stopped with Ctrl+C. It comes with a [Makefile](example/c/Makefile) that builds the shared library and the program:
@@ -154,13 +177,19 @@ print("machine:", 100.0 * lib.cpuload_system_usage(ctypes.byref(before), ctypes.
 print("firefox:", 100.0 * lib.cpuload_process_usage(ctypes.byref(before), ctypes.byref(after)), "%")
 ```
 
+`cpuload_take_pid_with` and `cpuload_take_app_with` are there as well, taking the machine sample as their middle argument. [example/python/main.py](example/python/main.py) uses them, and declares the types of every function it calls, which ctypes needs to keep the `double` values whole on the way back.
+
 Note that Python puts its own Ctrl+C handler back after loading the library if you want to stop a reading loop that way: the Ada runtime installs its own while it starts up.
 
 Java (through FFM or JNA), Rust (through `libloading` or FFI declarations), and every other language with a C FFI work the same way.
 
 ## Adding a new OS
 
-The package spec [src/cpu_load.ads](src/cpu_load.ads) is shared by every OS, and holds the usage functions. Each OS brings its own body of the three `Take` functions ([src/linux](src/linux/cpu_load.adb), [src/macos](src/macos/cpu_load.adb), [src/windows](src/windows/cpu_load.adb)), and [cpuload.gpr](cpuload.gpr) picks the folder for the OS being built from the `PJ_OS` symbol. To support a new OS, write the implementation body and add its folder there.
+The package spec [src/cpu_load.ads](src/cpu_load.ads) and its body [src/cpu_load.adb](src/cpu_load.adb) are shared by every OS, and hold the `Take` and usage functions.
+
+Each OS brings its own body of [src/cpu_load-platform.ads](src/cpu_load-platform.ads), which is the specific OS code: `Measure_System`, `Ticks_Of_PID` and `Used_By_App`. One body per OS lives in [src/linux](src/linux/cpu_load-platform.adb), [src/macos](src/macos/cpu_load-platform.adb) and [src/windows](src/windows/cpu_load-platform.adb), and [cpuload.gpr](cpuload.gpr) picks the folder for the OS being built from the `PJ_OS` symbol.
+
+To support a new OS, write a body of `CPU_Load.Platform` for it and add its folder there.
 
 ## 📜 License
 

@@ -50,10 +50,24 @@ void cpuload_take_pid(unsigned int pid, cpuload_sample *out);
 
 /* Take a sample of the system and of every process running the named application
  * The name is the program's own, without its folder, and it is exactly matched and case insensitive, so "firefox" finds "Firefox"
- * On macOS the program's own name is matched the same way, so "firefox" finds the firefox inside Firefox.app
+ * Every system matches the program the process runs, so "firefox" finds every process of Firefox, its content processes included
+ * On macOS that is the program inside the bundle, so "firefox" finds the firefox inside Firefox.app
  * On Windows a trailing ".exe" is ignored as well, so "firefox" also finds "firefox.exe"
+ * A machine running more than 65536 processes is read as far as that, and any process past it is passed over
 */
 void cpuload_take_app(const char *app, cpuload_sample *out);
+
+/* The same two, but against a machine sample already taken instead of taking another one
+ * Several things are then measured over exactly the same stretch of time, and the machine's counters are read once instead of once per thing:
+ *
+ *   cpuload_sample machine, mine, theirs;
+ *   cpuload_take_system(&machine);
+ *   cpuload_take_pid_with(getpid(), &machine, &mine);
+ *   cpuload_take_app_with("firefox", &machine, &theirs);
+ *
+ * A NULL machine is read as no reading at all, which the two usage functions below answer 0.0 for */
+void cpuload_take_pid_with(unsigned int pid, const cpuload_sample *machine, cpuload_sample *out);
+void cpuload_take_app_with(const char *app, const cpuload_sample *machine, cpuload_sample *out);
 
 /* How busy the whole machine was between two samples, from 0.0 to 1.0
  * Two samples that cannot be compared (one that could not be taken, or a pair given the wrong way round) give 0.0, and so does a NULL pointer */

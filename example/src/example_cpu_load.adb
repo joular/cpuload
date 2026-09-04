@@ -21,7 +21,6 @@ with Ada.Strings.Fixed; use Ada.Strings.Fixed;
 with Ada.Text_IO; use Ada.Text_IO;
 with GNAT.Ctrl_C;
 with GNAT.OS_Lib;
-with System.Multiprocessors;
 
 with CPU_Load; use CPU_Load;
 
@@ -61,24 +60,17 @@ procedure Example_CPU_Load is
     --  Goes back to the beginning of the line and erases it, so each reading overwrites the previous one instead of scrolling
     Clear_Line : constant String := ASCII.CR & Escape & "[2K";
 
+    --  Formats one load as a percentage with two decimals
     --  A load is a share of the whole machine, so one core fully busy on an eight core machine reads 12.5%
-    --  Multiplied by the number of cores, it is the figure top and the task manager show
-    Cores : constant Long_Float :=
-        Long_Float (System.Multiprocessors.Number_Of_CPUs);
-
-    --  Formats one load as a percentage with two decimals, of the whole machine and then of one core
     function Image (Colour : in String;
                     Name : in String;
                     Load : in Long_Float) return String is
         Machine_Share : String (1 .. 12);
-        Core_Share : String (1 .. 12);
     begin
         Value_IO.Put (To => Machine_Share, Item => 100.0 * Load, Aft => 2, Exp => 0);
-        Value_IO.Put (To => Core_Share, Item => 100.0 * Load * Cores, Aft => 2, Exp => 0);
 
         return Colour & Name
                & " " & Trim (Machine_Share, Left) & "%"
-               & " (" & Trim (Core_Share, Left) & "% of one core)"
                & Reset;
     exception
         --  The value does not fit in the buffer
@@ -96,7 +88,8 @@ procedure Example_CPU_Load is
     App : constant String :=
         (if Argument_Count >= 1 then Argument (1) else "");
 
-    --  Each thing followed keeps its own pair of samples, so each is measured over exactly the stretch of time between its own two
+    --  The machine is read once per reading, and the other two are measured against that one reading
+    --  Each of the three is then measured over exactly the same stretch of time, and the machine's counters are read once a second rather than three times
     Machine_Before, Machine_After : Sample;
     Mine_Before, Mine_After : Sample;
     App_Before, App_After : Sample;
@@ -118,8 +111,8 @@ begin
 
     --  The first sample of each, which the first reading below is measured against
     Machine_Before := Take;
-    Mine_Before := Take (Ours);
-    App_Before := Take (App);
+    Mine_Before := Take (Ours, Machine_Before);
+    App_Before := Take (App, Machine_Before);
 
     --  A Total of zero is the library saying it could not read the machine's counters at all
     --  It is what a library built for another system does here, and it would otherwise show as a row of 0% every second, which looks like an idle machine rather than a build to redo
@@ -138,8 +131,8 @@ begin
         exit when Stop_Asked;
 
         Machine_After := Take;
-        Mine_After := Take (Ours);
-        App_After := Take (App);
+        Mine_After := Take (Ours, Machine_After);
+        App_After := Take (App, Machine_After);
 
         Put (Clear_Line
              & Image (Machine_Colour, "machine",

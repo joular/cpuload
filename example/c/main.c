@@ -65,7 +65,8 @@ int main(int argc, char **argv)
 
     unsigned int ours = current_pid();
 
-    /* Each thing followed keeps its own pair of samples, so each is measured over exactly the stretch of time between its own two */
+    /* The machine is read once per reading, and the other two are measured against that one reading
+     * Each of the three is then measured over exactly the same stretch of time, and the machine's counters are read once a second rather than three times */
     cpuload_sample machine_before, machine_after;
     cpuload_sample mine_before, mine_after;
     cpuload_sample app_before, app_after;
@@ -82,8 +83,17 @@ int main(int argc, char **argv)
 
     /* The first sample of each, which the first reading below is measured against */
     cpuload_take_system(&machine_before);
-    cpuload_take_pid(ours, &mine_before);
-    cpuload_take_app(app, &app_before);
+    cpuload_take_pid_with(ours, &machine_before, &mine_before);
+    cpuload_take_app_with(app, &machine_before, &app_before);
+
+    /* A total of zero is the library saying it could not read the machine's counters at all
+     * It is what a library built for another system does here, and it would otherwise show as a row of 0% every second, which looks like an idle machine rather than a build to redo */
+    if (machine_before.total == 0) {
+        printf("The machine's counters could not be read at all."
+               " This is what a library built for another system does:"
+               " build it again with -XPJ_OS for this one (linux, macos or windows).\n");
+        return 1;
+    }
 
     while (!stop_asked) {
         sleep_one_second();
@@ -93,8 +103,8 @@ int main(int argc, char **argv)
             break;
 
         cpuload_take_system(&machine_after);
-        cpuload_take_pid(ours, &mine_after);
-        cpuload_take_app(app, &app_after);
+        cpuload_take_pid_with(ours, &machine_after, &mine_after);
+        cpuload_take_app_with(app, &machine_after, &app_after);
 
         print_load("machine", cpuload_system_usage(&machine_before, &machine_after));
         printf(" | ");

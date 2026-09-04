@@ -31,8 +31,9 @@ package CPU_Load.C_API is
 
     -- Three 64 bit counters and nothing else, exactly as cpuload.h declares it
     -- Were it ever padded out to more, every sample read from C would be nonsense
+    -- 'Object_Size and not 'Size: what is asked here is how much room the record actually takes, padding and all, which is what C reads and writes
     pragma Compile_Time_Error
-        (C_Sample'Size /= 192, "struct cpuload_sample must be exactly 24 bytes");
+        (C_Sample'Object_Size /= 192, "struct cpuload_sample must be exactly 24 bytes");
 
     -- Same as CPU_Load.Take: writes a sample of the whole system into Result
     procedure C_Take_System (Result : access C_Sample)
@@ -48,6 +49,19 @@ package CPU_Load.C_API is
     procedure C_Take_App (App : in Interfaces.C.Strings.chars_ptr;
                           Result : access C_Sample)
         with Export, Convention => C, External_Name => "cpuload_take_app";
+
+    -- The same two, but against a machine sample already taken instead of taking another one
+    -- Several things are then measured over exactly the same stretch of time, and the machine's counters are read once instead of once per thing
+    -- A NULL Machine is read as no reading at all, which the two usage functions answer 0.0 for
+    procedure C_Take_PID_With (PID : in Interfaces.C.unsigned;
+                               Machine : access constant C_Sample;
+                               Result : access C_Sample)
+        with Export, Convention => C, External_Name => "cpuload_take_pid_with";
+
+    procedure C_Take_App_With (App : in Interfaces.C.Strings.chars_ptr;
+                               Machine : access constant C_Sample;
+                               Result : access C_Sample)
+        with Export, Convention => C, External_Name => "cpuload_take_app_with";
 
     -- Same as CPU_Load.System_Usage: how busy the machine was between the two samples, 0.0 .. 1.0
     -- A NULL pointer gives 0.0
