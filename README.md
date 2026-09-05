@@ -41,15 +41,15 @@ alr build
 Or directly with GNAT:
 
 ```bash
-gprbuild -P cpuload.gpr -XPJ_OS=macos
+gprbuild -P cpuload.gpr
 ```
 
-The build produces a static library by default. `-XPJ_OS` says which system to build for: `linux`, `macos` or `windows`. Windows is the only one recognised on its own, as nothing tells macOS from Linux at build time, so **pass `-XPJ_OS` yourself on the other two**. Alire sets it on its own, and so do the Makefiles of the examples, which ask `uname`. A library built for another system reads no counters at all and reports 0% for everything.
+The build produces a static library by default, and detects the system on its own: Linux, macOS and Windows are each recognised from the target gprbuild reports, so nothing has to be passed. `-XPJ_OS` still says which system to build for (`linux`, `macos` or `windows`) when it is not the one of the machine building it. Alire sets it too, and so do the Makefiles of the examples, which ask `uname`. A library built for another system reads no counters at all and reports 0% for everything.
 
 For other library types (shared, etc.), set `-XCPULOAD_LIBRARY_TYPE`:
 
 ```bash
-gprbuild -P cpuload.gpr -XPJ_OS=macos -XCPULOAD_LIBRARY_TYPE=relocatable
+gprbuild -P cpuload.gpr -XCPULOAD_LIBRARY_TYPE=relocatable
 ```
 
 `relocatable` builds the shared library (`libCPU_Load.so` / `.dll` / `.dylib`) that carries the C interface and is standalone: it starts itself up when loaded. On Linux and Windows it is encapsulated as well, carrying the Ada runtime with it, so it is one self-contained file.
@@ -97,11 +97,11 @@ Theirs := Take ("firefox", Machine);
 A full example program is in [example/src/example_cpu_load.adb](example/src/example_cpu_load.adb). It follows the machine, itself, and an application named on the command line, once per second until stopped with Ctrl+C:
 
 ```bash
-gprbuild -P example/example.gpr -XPJ_OS=macos -p
+gprbuild -P example/example.gpr -p
 ./example/example_cpu_load firefox
 ```
 
-Give `-XPJ_OS` here too: the example builds the library with it, and one built for another system reads no counters at all and reports 0% for everything.
+The counters need no particular rights on any of the three systems. When the machine reads nothing at all, the example says what to look into on the system it was built for.
 
 With Alire, add the library to your project with `alr with cpuload`.
 
@@ -141,7 +141,7 @@ make -C example/c run APP=firefox
 To build it by hand instead, from the root of the repository, first compile the library:
 
 ```bash
-gprbuild -P cpuload.gpr -XPJ_OS=macos -XCPULOAD_LIBRARY_TYPE=relocatable
+gprbuild -P cpuload.gpr -XCPULOAD_LIBRARY_TYPE=relocatable
 ```
 
 Then compile the C program:

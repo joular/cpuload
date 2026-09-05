@@ -10,7 +10,8 @@ project Example is
     for Create_Missing_Dirs use "True";
 
     package Compiler is
-        for Switches ("Ada") use ("-O2", "-gnat2012", "-gnatwa");
+        --  The OS symbols of the library, so the example says what applies to the machine it runs on
+        for Switches ("Ada") use ("-O2", "-gnat2012", "-gnatwa") & CpuLoad.Defines;
     end Compiler;
 
     package Binder is

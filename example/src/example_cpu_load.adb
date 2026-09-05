@@ -11,8 +11,8 @@
 
 --  Prints the CPU load of the machine, of this very program, and of an application named on the command line, every second, until stopped with Ctrl+C
 --
---  Build and run it with (-XPJ_OS says which system to build for: linux, macos or windows):
---    gprbuild -P example/example.gpr -XPJ_OS=macos -p
+--  Build and run it with (the system is detected on its own, -XPJ_OS overrides it: linux, macos or windows):
+--    gprbuild -P example/example.gpr -p
 --    ./example/example_cpu_load firefox
 
 with Ada.Command_Line; use Ada.Command_Line;
@@ -115,12 +115,20 @@ begin
     App_Before := Take (App, Machine_Before);
 
     --  A Total of zero is the library saying it could not read the machine's counters at all
-    --  It is what a library built for another system does here, and it would otherwise show as a row of 0% every second, which looks like an idle machine rather than a build to redo
+    --  Without this it would show as a row of 0% every second, which looks like an idle machine rather than something to look into
     if Machine_Before.Total = 0 then
         Put_Line (Trouble_Colour
                   & "The machine's counters could not be read at all."
-                  & " This is what a library built for another system does: build it again with -XPJ_OS for this one (linux, macos or windows)."
                   & Reset);
+
+#if PJ_MACOS then
+        Put_Line ("macOS is read through host_statistics, which needs no particular rights, so a Mac answering nothing means this was built for another system: build it again with -XPJ_OS=macos.");
+#elsif PJ_WINDOWS then
+        Put_Line ("Windows is read through GetSystemTimes, which needs no elevated terminal, so a machine answering nothing means this was built for another system: build it again with -XPJ_OS=windows.");
+#else
+        Put_Line ("Linux is read from the first line of /proc/stat, which any user reads, so /proc is not mounted here (a container or a chroot built without it), or this was built for another system: build it again with -XPJ_OS=linux.");
+#end if;
+
         return;
     end if;
 
