@@ -66,12 +66,13 @@ endif
 all: library $(EXE)
 
 # Build the shared library of CPU Load, which is the one holding the C interface
+# The copy goes with the library and not with the program below: the program is only relinked when its own sources change, so a library rebuilt on its own would leave the copy behind and stale
 library:
 	gprbuild -P $(ROOT)/cpuload.gpr -XPJ_OS=$(PJ_OS) -XCPULOAD_LIBRARY_TYPE=relocatable -p
+	$(COPY_LIBRARY)
 
 $(EXE): main.c $(ROOT)/include/cpuload.h
 	$(CC) $(CFLAGS) main.c $(LDFLAGS) -o $(EXE)
-	$(COPY_LIBRARY)
 
 # Follow an application as well:  make run APP=firefox
 run: all

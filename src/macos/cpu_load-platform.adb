@@ -60,10 +60,9 @@ package body CPU_Load.Platform is
     -- The idle time is no longer read, the total coming from a clock instead, but the machine still writes all four counters and the array has to hold room for every one of them
     pragma Unreferenced (Idle_Time);
 
-    -- macOS needs this as 16 bytes (four numbers of 32 bits)
-    -- 'Object_Size and not 'Size: what is asked here is how much room the array actually takes, padding and all, which is what the machine writes into
-    pragma Compile_Time_Error
-        (CPU_Ticks'Object_Size /= 128, "host_cpu_load_info must be exactly 16 bytes");
+    -- macOS needs this as 16 bytes (four numbers of 32 bits), laid out here rather than left to the compiler and checked afterwards, so it cannot come out any other way
+    for CPU_Ticks'Component_Size use 32;
+    for CPU_Ticks'Size use 128;
 
     -- A tick is a hundredth of a second (the hz of kern.clockrate, which is 100 on macOS)
     -- A process is counted in another unit altogether, and the machine's clock in a third, so all of them are turned into nanoseconds here and can then be compared
@@ -83,9 +82,17 @@ package body CPU_Load.Platform is
         end record
         with Convention => C;
 
-    -- macOS needs this as 96 bytes
-    pragma Compile_Time_Error
-        (Task_Times'Object_Size /= 96 * 8, "proc_taskinfo must be exactly 96 bytes");
+    -- macOS needs this as 96 bytes, laid out here rather than left to the compiler and checked afterwards, so it cannot come out any other way
+    for Task_Times use
+        record
+            Virtual_Size at 0 range 0 .. 63;
+            Resident_Size at 8 range 0 .. 63;
+            Total_User at 16 range 0 .. 63;
+            Total_System at 24 range 0 .. 63;
+            Rest at 32 range 0 .. 511;
+        end record;
+
+    for Task_Times'Size use 96 * 8;
 
     Task_Times_Bytes : constant Interfaces.C.int := Task_Times'Object_Size / 8;
 

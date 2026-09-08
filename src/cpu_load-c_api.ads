@@ -29,11 +29,15 @@ package CPU_Load.C_API is
         end record
         with Convention => C;
 
-    -- Three 64 bit counters and nothing else, exactly as cpuload.h declares it
-    -- Were it ever padded out to more, every sample read from C would be nonsense
-    -- 'Object_Size and not 'Size: what is asked here is how much room the record actually takes, padding and all, which is what C reads and writes
-    pragma Compile_Time_Error
-        (C_Sample'Object_Size /= 192, "struct cpuload_sample must be exactly 24 bytes");
+    -- Three 64 bit counters and nothing else, exactly as cpuload.h declares it, laid out here rather than left to the compiler and checked afterwards: were it ever padded out to more, every sample read from C would be nonsense, and this way it cannot be
+    for C_Sample use
+        record
+            Busy at 0 range 0 .. 63;
+            Total at 8 range 0 .. 63;
+            Used at 16 range 0 .. 63;
+        end record;
+
+    for C_Sample'Size use 192;
 
     -- Same as CPU_Load.Take: writes a sample of the whole system into Result
     procedure C_Take_System (Result : access C_Sample)

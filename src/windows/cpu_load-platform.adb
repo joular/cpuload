@@ -39,10 +39,14 @@ package body CPU_Load.Platform is
         end record
         with Convention => C;
 
-    -- Windows needs this as 8 bytes
-    -- 'Object_Size and not 'Size: what is asked here is how much room the record actually takes, padding and all, which is what Windows writes into
-    pragma Compile_Time_Error
-        (FILETIME'Object_Size /= 64, "FILETIME must be exactly 8 bytes");
+    -- Windows needs this as 8 bytes, laid out here rather than left to the compiler and checked afterwards, so it cannot come out any other way
+    for FILETIME use
+        record
+            Low at 0 range 0 .. 31;
+            High at 4 range 0 .. 31;
+        end record;
+
+    for FILETIME'Size use 64;
 
     -- A wide character in Windows is sixteen bits
     pragma Compile_Time_Error
