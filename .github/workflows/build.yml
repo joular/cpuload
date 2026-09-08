@@ -17,6 +17,19 @@ jobs:
       # Alire brings the GNAT toolchain, and picks PJ_OS for the system it runs on
       - uses: alire-project/setup-alire@v6
 
+      # cpuload_version() is part of the public C interface, so a release where it disagrees with the published crate version is a confusing bug. The two are kept in step by hand, so check them here
+      - name: Check the version in alire.toml and in the library agree
+        shell: bash
+        run: |
+          crate=$(grep -m1 '^version' alire.toml | cut -d'"' -f2)
+          code=$(grep -A2 'Keep it the same as the version in alire.toml' src/cpu_load.ads \
+                 | grep -o '"[0-9][^"]*"' | tr -d '"')
+          echo "alire.toml: $crate    src/cpu_load.ads: $code"
+          if [ -z "$crate" ] || [ "$crate" != "$code" ]; then
+            echo "::error::version mismatch between alire.toml and src/cpu_load.ads"
+            exit 1
+          fi
+
       - name: Build the static library
         run: alr --non-interactive build
 

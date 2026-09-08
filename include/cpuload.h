@@ -14,7 +14,8 @@
  *
  * Use it with the relocatable (shared) build of the library (libCPU_Load.so on Linux, libCPU_Load.dylib on macOS, CPU_Load.dll on Windows), which starts itself up when loaded: no other initialization call is needed
  *
- * Library is thread-safe
+ * The library is thread-safe: none of these functions keeps any state of its own, so any number of threads may call them at once.
+ * It does not mean two threads sampling the same thing see a consistent pair of reading as each caller holds its own samples.
  *
  * How to use it: take a sample, wait, take another sample, and compare the two
  *
@@ -23,6 +24,8 @@
  *   sleep(1);
  *   cpuload_take_app("firefox", &after);
  *   printf("%.2f%%\n", 100.0 * cpuload_process_usage(&before, &after));
+ *
+ * Sample about a second apart. Linux counts a process in units of 10 ms and Windows in units of about 15 ms, so a shorter wait than that has too few of them in it to divide by. macOS counts in nanoseconds and reads well below a second.
  */
 
 #ifndef CPULOAD_H
@@ -34,18 +37,19 @@
 extern "C" {
 #endif
 
-/* The CPU counters at one moment */
+/* The CPU counters at one moment, in nanoseconds, on all systems
+ * A total of 0 means the sample could not be taken at all */
 typedef struct cpuload_sample {
-    int64_t busy;   /* machine time not spent idle */
-    int64_t total;  /* machine time altogether, idle included */
-    int64_t used;   /* CPU time of what was sampled, 0 for a sample of the system */
+    int64_t busy;   /* machine time not spent idle, added up over every core */
+    int64_t total;  /* machine time altogether, idle included, added up over every core */
+    int64_t used;   /* CPU time of what was sampled, 0 for a sample of the system, -1 if it could not be read */
 } cpuload_sample;
 
 /* Take a sample of the whole system and write it into *out */
 void cpuload_take_system(cpuload_sample *out);
 
 /* Take a sample of the system and of one process, by its number
- * used is 0 if that number is not running, and 0 is not a process number on either system */
+ * used is -1 if that process could not be read at all, which on macOS and Windows is what another user's processes do: neither system tells an ordinary user how much CPU time those have used */
 void cpuload_take_pid(unsigned int pid, cpuload_sample *out);
 
 /* Take a sample of the system and of every process running the named application
@@ -75,6 +79,9 @@ double cpuload_system_usage(const cpuload_sample *before, const cpuload_sample *
 
 /* How much of the whole machine the process or application used, from 0.0 to 1.0
  * It is a share of the whole machine, not of one core: a process using all of one core of an eight core machine gives 0.125, not 1.0
+ *
+ * A NEGATIVE answer means it could not be read at all: it is not running, it has stopped, or the system does not let us get this info.
+ * That is not the same as 0.0, which means something that used no CPU time.
 */
 double cpuload_process_usage(const cpuload_sample *before, const cpuload_sample *after);
 

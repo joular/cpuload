@@ -23,7 +23,7 @@ package body CPU_Load.Platform is
 
     -- The 32 bits numbers the machine counts its time in
     -- Being only 32 bits, they come back round to zero after some weeks of the machine running: a hundred of them a second for every core, so about fifty days on ten cores and twenty on twenty-four
-    -- One reading then comes out at 0%, the guards in System_Usage and Process_Usage catching a total that went backwards, and the reading after it is right again
+    -- Only Busy is built out of them, the total time coming from a clock that does not come round, so one reading of the machine then comes out at 0%, the guard in System_Usage catching a busy time that went backwards, and the reading after it is right again
     subtype Counter is Interfaces.C.unsigned;
 
     Kern_Success : constant Kern_Return := 0;
@@ -57,13 +57,16 @@ package body CPU_Load.Platform is
     type CPU_State is (User_Time, System_Time, Idle_Time, Nice_Time);
     type CPU_Ticks is array (CPU_State) of Counter with Convention => C;
 
+    -- The idle time is no longer read, the total coming from a clock instead, but the machine still writes all four counters and the array has to hold room for every one of them
+    pragma Unreferenced (Idle_Time);
+
     -- macOS needs this as 16 bytes (four numbers of 32 bits)
     -- 'Object_Size and not 'Size: what is asked here is how much room the array actually takes, padding and all, which is what the machine writes into
     pragma Compile_Time_Error
         (CPU_Ticks'Object_Size /= 128, "host_cpu_load_info must be exactly 16 bytes");
 
     -- A tick is a hundredth of a second (the hz of kern.clockrate, which is 100 on macOS)
-    -- A process is counted in another unit altogether, so both are turned into nanoseconds here and the two can then be compared
+    -- A process is counted in another unit altogether, and the machine's clock in a third, so all of them are turned into nanoseconds here and can then be compared
     Nanoseconds_Per_Tick : constant := 10_000_000;
 
     -- The counters of one process, as the machine writes them
@@ -134,6 +137,11 @@ package body CPU_Load.Platform is
                              Room : in Interfaces.C.int) return Interfaces.C.int
         with Import, Convention => C, External_Name => "proc_listpids";
 
+    -- A clock that only ever moves forward, in the machine's own time units
+    -- The very units a process's time comes in, so the timebase below turns both into nanoseconds
+    function Mach_Now return Unsigned_64
+        with Import, Convention => C, External_Name => "mach_absolute_time";
+
     --------------------------------------------------
 
     -- Read the two numbers turning the machine's time units into nanoseconds
@@ -156,6 +164,15 @@ package body CPU_Load.Platform is
 
     -- Asked once as well, as it does not change while the machine is running
     Time_Unit : constant Timebase := Read_Timebase;
+
+    --------------------------------------------------
+
+    -- What the forward-only clock reads, in nanoseconds; only differences between two mean anything
+    -- Multiplied before divided, so the fraction is not lost on the way
+    function Monotonic_Nanoseconds return Integer_64 is
+        (Integer_64 (Mach_Now)
+         * Integer_64 (Time_Unit.Numerator)
+         / Integer_64 (Time_Unit.Denominator));
 
     --------------------------------------------------
 
@@ -188,7 +205,7 @@ package body CPU_Load.Platform is
     --------------------------------------------------
 
     -- Measure a specific PID CPU time, in nanoseconds
-    -- Returns 0 if process does not exist, stopped, or belongs to another user (the machine only tells root about those)
+    -- Returns Not_Read if the process does not exist, has stopped, or belongs to another user: the machine only tells root about those, and it refuses about a third of what is running on a Mac of a usual size
     function Ticks_Of_PID (PID : in Process_ID) return Integer_64 is
         Times : Task_Times;
     begin
@@ -199,7 +216,7 @@ package body CPU_Load.Platform is
                       Info => Times'Address,
                       Room => Task_Times_Bytes) /= Task_Times_Bytes
         then
-            return 0;
+            return Not_Read;
         end if;
 
         -- A process is counted in the machine's own time units, so they are turned into nanoseconds
@@ -209,16 +226,19 @@ package body CPU_Load.Platform is
                / Integer_64 (Time_Unit.Denominator);
     exception
         when others =>
-            return 0;
+            return Not_Read;
     end Ticks_Of_PID;
 
     --------------------------------------------------
 
     -- Add up the CPU time of every process of the application, out of the Count process numbers the machine listed
+    -- A process of the application whose time the machine will not give is left out, and the sum is then short by however much it used
+    -- Returns Not_Read when some of them were left out that way and what remained added up to nothing at all
     function Sum_Named (Numbers : in Number_Array;
                         Count : in Natural;
                         App_Name : in String) return Integer_64 is
         Result : Integer_64 := 0;
+        Unread : Natural := 0;
     begin
         for Walked in Numbers'First .. Numbers'First + Count - 1 loop
             -- Number 0 is the machine's own kernel, and a negative one is no process at all
@@ -227,9 +247,24 @@ package body CPU_Load.Platform is
             if Numbers (Walked) > 0
                and then Program_Of (Process_ID (Numbers (Walked))) = App_Name
             then
-                Result := Result + Ticks_Of_PID (Process_ID (Numbers (Walked)));
+                declare
+                    Used : constant Integer_64 :=
+                        Ticks_Of_PID (Process_ID (Numbers (Walked)));
+                begin
+                    if Used = Not_Read then
+                        Unread := Unread + 1;
+                    else
+                        Result := Result + Used;
+                    end if;
+                end;
             end if;
         end loop;
+
+        -- Processes of the application are running and would not say how much they used
+        -- A sum of zero would read as an application sitting idle, which is not what was found out here
+        if Unread > 0 and then Result = 0 then
+            return Not_Read;
+        end if;
 
         return Result;
     end Sum_Named;
@@ -257,7 +292,7 @@ package body CPU_Load.Platform is
 
             if Filled <= 0 then
                 Free (Numbers);
-                return 0;
+                return Not_Read;
             end if;
 
             -- Room to spare, or as large a list as this will ever ask for: count what came back
@@ -278,7 +313,7 @@ package body CPU_Load.Platform is
             -- Nothing is left behind, whatever went wrong above
             -- Free does nothing at all when there is nothing left to free
             Free (Numbers);
-            return 0;
+            return Not_Read;
     end Used_By_Many;
 
     --------------------------------------------------
@@ -305,9 +340,9 @@ package body CPU_Load.Platform is
                         + Integer_64 (Ticks (System_Time))
                         + Integer_64 (Ticks (Nice_Time))) * Nanoseconds_Per_Tick;
 
-        -- And the idle time to get total time
-        Result.Total := Result.Busy
-                      + Integer_64 (Ticks (Idle_Time)) * Nanoseconds_Per_Tick;
+        -- The CPU time the machine had to give over the same stretch
+        -- From the clock, not Idle_Time: macOS writes that about once every 90 ms, so two samples closer together than that would show no time passing at all
+        Result.Total := Monotonic_Nanoseconds * Cores;
 
         return Result;
     exception
@@ -335,7 +370,7 @@ package body CPU_Load.Platform is
                                   Room => Room);
 
         if Filled <= 0 then
-            return 0;
+            return Not_Read;
         end if;
 
         -- A list filled to the brim is the machine saying there may be more processes than fit in it
@@ -347,7 +382,7 @@ package body CPU_Load.Platform is
         return Sum_Named (Numbers, Natural (Filled) / Bytes_Per_Number, App_Name);
     exception
         when others =>
-            return 0;
+            return Not_Read;
     end Used_By_App;
 
 end CPU_Load.Platform;

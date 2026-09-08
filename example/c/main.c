@@ -51,10 +51,15 @@ static void on_ctrl_c(int signal_number)
 }
 
 /* Prints one load as a percentage of the whole machine
- * A load is a share of the whole machine, so one core fully busy on an eight core machine reads 12.5% */
+ * A load is a share of the whole machine, so one core fully busy on an eight core machine reads 12.5%
+ * A negative load indicated that the load could not be read or calculated: it is not running, it has stopped, or the system does not let this user look at it
+ */
 static void print_load(const char *name, double load)
 {
-    printf("%s %.2f%%", name, 100.0 * load);
+    if (load < 0.0)
+        printf("%s n/a", name);
+    else
+        printf("%s %.2f%%", name, 100.0 * load);
 }
 
 int main(int argc, char **argv)

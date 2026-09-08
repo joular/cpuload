@@ -20,6 +20,8 @@
 --     After := Take ("firefox");
 --     Put (System_Usage (Before, After)); -- System CPU load
 --     Put (Process_Usage (Before, After)); -- Firefox's CPU load
+-- Both loads run from 0.0 to 1.0, and are a share of the whole machine rather than of one core: a process using all of one core of an eight core machine gives 0.125, not 1.0
+-- Process_Usage gives a negative number when it could not be read process usage
 
 with Interfaces; use Interfaces;
 
@@ -28,10 +30,12 @@ package CPU_Load is
     -- Type for Process ID
     subtype Process_ID is Natural;
 
-    -- A sample reading
-    -- Busy: machine time spend doing something
-    -- Total: total machine time (busy + idle)
+    -- A sample reading counted in nanoseconds on every OS
+    -- Busy: machine time spent doing something, added up over every core
+    -- Total: the machine time there was to spend (the time that elapsed multiplied by the number of cores)
     -- Used: CPU time of the process or application monitored (0 if only monitoring the entire system)
+    -- A negative Used value means time could not be read at all, which Process_Usage answers with a negative load
+    -- A Total of 0 is the library saying the sample could not be taken at all
     type Sample is
         record
             Busy : Integer_64 := 0;
@@ -75,11 +79,17 @@ package CPU_Load is
         ;
     
     -- Calculate the CPU load of the process or the application
+    -- A negative answer means the process or the application could not be read at all: it is not running, it has stopped, or the OS does not let us get the info needed
+    -- That is not the same as 0.0, which means something that used no CPU time
     function Process_Usage (Before, After : in Sample) return Long_Float is
-        (if Before.Total = 0
+        (if Before.Used < 0
+            or else After.Used < 0
+         then
+            -1.0
+         elsif Before.Total = 0
             or else After.Total <= Before.Total
             or else After.Used <= Before.Used
-         then 
+         then
             0.0
          elsif After.Used - Before.Used >= After.Total - Before.Total
          then

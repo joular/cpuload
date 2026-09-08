@@ -1,4 +1,4 @@
-# <a href="https://www.noureddine.org/research/joular/"><img src="https://raw.githubusercontent.com/joular/.github/main/profile/joular.png" alt="Joular Project" width="64" /></a> CPU Load :bar_chart:
+# <a href="https://www.noureddine.org/research/joular/"><img src="https://raw.githubusercontent.com/joular/.github/main/profile/joular.png" alt="Joular Project" width="64" /></a> CPU Load
 
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPLv3-blue)](https://www.gnu.org/licenses/lgpl-3.0) [![Ada](https://img.shields.io/badge/Made%20with-Ada-blue)](https://www.adaic.org)
 
@@ -30,6 +30,18 @@ macOS is supported on Apple Silicon.
 
 BSD support is planned and will come in a future version.
 
+## :straight_ruler: Reading the numbers
+
+Every counter in a `Sample` is in **nanoseconds**, on every system. Both loads run from `0.0` to `1.0` and are a share of the **whole machine**, not of one core: a process using all of one core of an eight core machine reads `0.125`, not `1.0`.
+
+Sample recommendation is about a second apart. Linux counts a process in units of 10 ms and Windows in units of about 15 ms, so a shorter wait than that has too few of them in it to divide by. macOS counts in nanoseconds and reads well below a second.
+
+**A negative load means it could not be read at all**: not running, stopped, or not allowed to get the information needed. That is not the same as `0.0`, which means something that used no CPU time.
+
+For an application, a process that could not be read is left out of the sum, so the figure is short by what it used. The answer is negative only when some of the application's processes are running and none of them would say anything at all.
+
+Thread safety means these functions keep no state of their own, so any number of threads may call them at once. It does not mean two threads sampling the same thing see a consistent pair of readings as each caller holds its own samples.
+
 ## Building
 
 With [Alire](https://alire.ada.dev):
@@ -56,8 +68,11 @@ gprbuild -P cpuload.gpr -XCPULOAD_LIBRARY_TYPE=relocatable
 gprbuild cannot encapsulate on macOS, so the library reads the Ada runtime from its own file there, and looks for it next to itself. Copy it in once the library is built (the Makefiles of the examples do this for you):
 
 ```bash
-cp "$(gnatls -v | grep adalib | tr -d ' ')"/libgnat-*.dylib lib/relocatable/
+ADALIB="$(gnatls -v | grep adalib | tr -d ' ')"
+cp "$ADALIB"/libgnat-*.dylib "$ADALIB"/../../../../libgcc_s*.dylib lib/relocatable/
 ```
+
+Both are needed. `otool -L lib/relocatable/libCPU_Load.dylib` lists every `@rpath/` entry the library goes looking for, which is the reliable way to check if anything is missing: on the machine that built it those also resolve through the toolchain's own absolute paths, so a library that runs there may still fail to load anywhere else.
 
 ## Using from Ada
 

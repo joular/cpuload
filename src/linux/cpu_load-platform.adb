@@ -45,6 +45,33 @@ package body CPU_Load.Platform is
         return Interfaces.C.ptrdiff_t
         with Import, Convention => C, External_Name => "readlink";
 
+    -- Get how many of Linux own ticks make a second
+    function Sysconf (Name : in Interfaces.C.int) return Interfaces.C.long
+        with Import, Convention => C, External_Name => "sysconf";
+
+    --------------------------------------------------
+
+    -- The name sysconf answers about its own tick with
+    Clk_Tck : constant Interfaces.C.int := 2;
+
+    -- How many nanoseconds one of Linux's ticks is
+    -- /proc counts the times it writes in those ticks, and they have to be turned into nanoseconds so that a process and the machine's clock can be compared
+    function Read_Nanoseconds_Per_Jiffy return Integer_64 is
+        use type Interfaces.C.long;
+
+        Per_Second : constant Interfaces.C.long := Sysconf (Clk_Tck);
+    begin
+        if Per_Second <= 0 then
+            -- A hundred a second, which is what every machine this is built for answers
+            return 10_000_000;
+        end if;
+
+        return 1_000_000_000 / Integer_64 (Per_Second);
+    end Read_Nanoseconds_Per_Jiffy;
+
+    -- Asked once, as it does not change while the machine is running
+    Nanoseconds_Per_Jiffy : constant Integer_64 := Read_Nanoseconds_Per_Jiffy;
+
     --------------------------------------------------
 
     -- Get first line of a file
@@ -62,7 +89,13 @@ package body CPU_Load.Platform is
             return "";
         end if;
 
-        Read_Status := Read (File, Buffer'Address, Buffer'Length);
+        begin
+            Read_Status := Read (File, Buffer'Address, Buffer'Length);
+        exception
+            when others =>
+                Read_Status := 0;
+        end;
+
         Close (File);
 
         -- Failed to read the file
@@ -179,8 +212,8 @@ package body CPU_Load.Platform is
 
     --------------------------------------------------
 
-    -- Measure a specific PID CPU time, in the kernel's own ticks
-    -- Returns 0 if process does not exist, stopped, or line cannot be read
+    -- Measure a specific PID CPU time, in nanoseconds
+    -- Returns Not_Read if the process does not exist, has stopped, or its line cannot be read
     function Ticks_Of_PID (PID : in Process_ID) return Integer_64 is
         -- /proc/pid/stat is one line, ex.:
         -- 4242 (bash) S 1 4242 4242 0 -1 4194304 512 0 0 0 37 5 0 0 ...
@@ -196,7 +229,7 @@ package body CPU_Load.Platform is
     begin
         -- Unexpected file content or no process name
         if Closing_Index = 0 or else Closing_Index + 2 > Line'Last then
-            return 0;
+            return Not_Read;
         end if;
 
         -- After the process' name ")", the field is index 3, the state, so utime (field 14) is the 12th from there and stime (field 15) the 13th
@@ -207,14 +240,14 @@ package body CPU_Load.Platform is
 
         -- A line cut short before both of them is a line to make nothing of
         if Count < Values'Length then
-            return 0;
+            return Not_Read;
         end if;
 
-        -- Return CPU time for process (utime + stime)
-        return Values (1) + Values (2);
+        -- Return CPU time for process (utime + stime), turned from Linux's ticks into nanoseconds
+        return (Values (1) + Values (2)) * Nanoseconds_Per_Jiffy;
     exception
         when others =>
-            return 0;
+            return Not_Read;
     end Ticks_Of_PID;
 
     --------------------------------------------------
@@ -250,18 +283,20 @@ package body CPU_Load.Platform is
             return Result;
         end if;
 
-        -- Calculate busy CPU time
-        Result.Busy := Values (1)  -- user
-                     + Values (2)  -- nice
-                     + Values (3)  -- system
-                     + Values (6)  -- irq
-                     + Values (7)  -- softirq
-                     + Values (8); -- steal
+        -- Everything the machine did other than idle, turned from Linux's ticks into nanoseconds
+        Result.Busy := (Values (1)     -- user
+                        + Values (2)   -- nice
+                        + Values (3)   -- system
+                        + Values (6)   -- irq
+                        + Values (7)   -- softirq
+                        + Values (8))  -- steal
+                       * Nanoseconds_Per_Jiffy;
 
-        -- Calculate total CPU time by adding idle and iowait
+        -- Add the idle time to get total time
         Result.Total := Result.Busy
-                      + Values (4)  -- idle
-                      + Values (5); -- iowait
+                      + (Values (4)     -- idle
+                         + Values (5))  -- iowait
+                        * Nanoseconds_Per_Jiffy;
 
         return Result;
     exception
@@ -276,6 +311,7 @@ package body CPU_Load.Platform is
         use Ada.Characters.Handling;
 
         Result : Integer_64 := 0;
+        Unread : Natural := 0;
         Folder : Dir_Type;
 
         -- Read function fills a buffer with the number of actual content it read
@@ -288,7 +324,13 @@ package body CPU_Load.Platform is
         App_Name : constant String := To_Lower (App);
     begin
         -- Open /proc folder, then we'll search for all processes of the app
-        Open (Folder, Proc_Path);
+        -- No /proc to read is no reading to give, rather than a reading of nothing
+        begin
+            Open (Folder, Proc_Path);
+        exception
+            when others =>
+                return Not_Read;
+        end;
 
         loop
             -- Read every process folder and check if it is one belonging to the app
@@ -303,17 +345,37 @@ package body CPU_Load.Platform is
 
                 -- Asking the name first is what keeps this cheap: a process that is not the one wanted is never asked for its times
                 if Program_Of (PID) = App_Name then
-                    Result := Result + Ticks_Of_PID (PID);
+                    declare
+                        Used : constant Integer_64 := Ticks_Of_PID (PID);
+                    begin
+                        -- A process of the application whose line could not be read is left out, and the sum is then short by however much it used
+                        if Used = Not_Read then
+                            Unread := Unread + 1;
+                        else
+                            Result := Result + Used;
+                        end if;
+                    end;
                 end if;
             end if;
         end loop;
 
         Close (Folder);
+
+        -- Processes of the application are running and their lines could not be read
+        -- A sum of zero would read as an application sitting idle, which is not what was found out here
+        if Unread > 0 and then Result = 0 then
+            return Not_Read;
+        end if;
+
         return Result;
     exception
         when others =>
             if Is_Open (Folder) then
                 Close (Folder);
+            end if;
+
+            if Unread > 0 and then Result = 0 then
+                return Not_Read;
             end if;
 
             return Result;

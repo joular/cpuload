@@ -131,7 +131,12 @@ def load_text(name, load):
     """One load as a percentage of the whole machine.
 
     A load is a share of the whole machine, so one core fully busy on an eight core machine reads 12.5%.
+
+    A negative load indicated that the load could not be read or calculated: it is not running, it has stopped, or the system does not let this user look at it
     """
+    if load < 0.0:
+        return "{} n/a".format(name)
+
     return "{} {:.2f}%".format(name, 100.0 * load)
 
 

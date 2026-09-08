@@ -43,6 +43,8 @@ package body CPU_Load is
 
     --------------------------------------------------
 
+    -- Walking every process takes about a millisecond, so Used is read that much after Machine
+    -- The same gap is in both samples of a pair, so it cancels out in the difference
     function Take (App : in String; Machine : in Sample) return Sample is
         Result : Sample := (Busy => Machine.Busy, Total => Machine.Total, Used => 0);
     begin

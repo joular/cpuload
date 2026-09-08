@@ -31,6 +31,7 @@ package body CPU_Load.Platform is
 
     -- A length of time in units of a hundred nanoseconds
     -- Windows handles it as two halves, which needs to be put back together
+    -- Joined below turns one into nanoseconds, the unit every time in a Sample is counted in
     type FILETIME is
         record
             Low : DWORD := 0;
@@ -104,11 +105,14 @@ package body CPU_Load.Platform is
         with Import, Convention => Stdcall,
              External_Name => "QueryFullProcessImageNameW";
 
-    -- Join the two halves of a FILETIME as one number
+    -- Windows counts its times in units of a hundred nanoseconds
+    Nanoseconds_Per_Unit : constant := 100;
+
+    -- Join the two halves of a FILETIME as one number, in nanoseconds
     -- 64 bits are needed: a Long_Integer is 32 bits on Windows, so 2 ** 32 does not even fit in one
     function Joined (Value : in FILETIME) return Integer_64 is
-        (Integer_64 (Value.High) * 2 ** 32
-         + Integer_64 (Value.Low));
+        ((Integer_64 (Value.High) * 2 ** 32
+          + Integer_64 (Value.Low)) * Nanoseconds_Per_Unit);
 
     --------------------------------------------------
 
@@ -125,21 +129,21 @@ package body CPU_Load.Platform is
 
     --------------------------------------------------
 
-    -- Measure a specific PID CPU time, in hunderds of nanoseconds
-    -- Returns 0 if process does not exist, stopped, or any other issue
+    -- Measure a specific PID CPU time, in nanoseconds
+    -- Returns Not_Read if the process does not exist, has stopped, or Windows will not open it, which it will not for another user's processes
     function Ticks_Of_PID (PID : in Process_ID) return Integer_64 is
         Process : Handle := Invalid_Handle;
         Ignored : BOOL;
 
         Created, Finished, Kernel, User : aliased FILETIME;
-        Used : Integer_64 := 0;
+        Used : Integer_64 := Not_Read;
     begin
         Process := Open_Process (Access_Wanted => Query_Limited_Information,
                                  Inherit => 0,
                                  PID => DWORD (PID));
 
         if Process = Invalid_Handle then
-            return 0;
+            return Not_Read;
         end if;
 
         if Get_Process_Times (Process,
@@ -163,13 +167,13 @@ package body CPU_Load.Platform is
                 Process := Invalid_Handle;
             end if;
 
-            return 0;
+            return Not_Read;
     end Ticks_Of_PID;
 
     --------------------------------------------------
 
     -- Measure the CPU time of one process, but only if its program is the one named
-    -- Returns 0 if it runs another program, or if it cannot be read at all
+    -- Returns 0 if it runs another program, and Not_Read if it runs this one and would not say how much it used
     -- The process is opened once here for both questions, and asking the name first is what keeps this cheap: a process that is not the one wanted is never asked for its times
     function Ticks_If_Named (PID : in Process_ID;
                              App_Name : in String) return Integer_64 is
@@ -200,11 +204,16 @@ package body CPU_Load.Platform is
            and then Natural (Room) <= Buffer'Length
            and then Plain_Name (Base_Name (Encode (Buffer (1 .. Natural (Room)))))
                     = App_Name
-           and then Get_Process_Times (Process,
-                                       Created'Access, Finished'Access,
-                                       Kernel'Access, User'Access) /= 0
         then
-            Used := Joined (Kernel) + Joined (User);
+            -- It is the application's, so from here its time is either read or missing
+            if Get_Process_Times (Process,
+                                  Created'Access, Finished'Access,
+                                  Kernel'Access, User'Access) /= 0
+            then
+                Used := Joined (Kernel) + Joined (User);
+            else
+                Used := Not_Read;
+            end if;
         end if;
 
         Ignored := Close_Handle (Process);
@@ -228,16 +237,31 @@ package body CPU_Load.Platform is
                         Count : in Natural;
                         App_Name : in String) return Integer_64 is
         Result : Integer_64 := 0;
+        Unread : Natural := 0;
     begin
         for Walked in Numbers'First .. Numbers'First + Count - 1 loop
             -- Number 0 is the idle process, and a number too large for a Process_ID is not a valid one
             if Numbers (Walked) > 0
                and then Numbers (Walked) <= DWORD (Process_ID'Last)
             then
-                Result := Result
-                        + Ticks_If_Named (Process_ID (Numbers (Walked)), App_Name);
+                declare
+                    Used : constant Integer_64 :=
+                        Ticks_If_Named (Process_ID (Numbers (Walked)), App_Name);
+                begin
+                    if Used = Not_Read then
+                        Unread := Unread + 1;
+                    else
+                        Result := Result + Used;
+                    end if;
+                end;
             end if;
         end loop;
+
+        -- Processes of the application are running and would not say how much they used
+        -- A sum of zero would read as an application sitting idle, which is not what was found out here
+        if Unread > 0 and then Result = 0 then
+            return Not_Read;
+        end if;
 
         return Result;
     end Sum_Named;
@@ -263,7 +287,7 @@ package body CPU_Load.Platform is
                                Filled => Filled'Access) = 0
             then
                 Free (Numbers);
-                return 0;
+                return Not_Read;
             end if;
 
             -- Room to spare, or as large a list as this will ever ask for: count what came back
@@ -284,7 +308,7 @@ package body CPU_Load.Platform is
             -- Nothing is left behind, whatever went wrong above
             -- Free does nothing at all when there is nothing left to free
             Free (Numbers);
-            return 0;
+            return Not_Read;
     end Used_By_Many;
 
     --------------------------------------------------
@@ -324,7 +348,7 @@ package body CPU_Load.Platform is
                            Room => Room,
                            Filled => Filled'Access) = 0
         then
-            return 0;
+            return Not_Read;
         end if;
 
         -- A list filled to the brim is Windows saying there may be more processes than fit in it
@@ -336,7 +360,7 @@ package body CPU_Load.Platform is
         return Sum_Named (Numbers, Natural (Filled) / Bytes_Per_Number, App_Name);
     exception
         when others =>
-            return 0;
+            return Not_Read;
     end Used_By_App;
 
 end CPU_Load.Platform;
