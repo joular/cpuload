@@ -66,10 +66,13 @@ procedure Example_CPU_Load is
                     Name : in String;
                     Load : in Long_Float) return String is
         Machine_Share : String (1 .. 12);
+
+        --  What is printed when there is no reading to print
+        Unreadable : constant String := Colour & Name & " n/a" & Reset;
     begin
         --  A negative load indicated that the load could not be read or calculated: it is not running, it has stopped, or the system does not let this user look at it
         if Load < 0.0 then
-            return Colour & Name & " n/a" & Reset;
+            return Unreadable;
         end if;
 
         Value_IO.Put (To => Machine_Share, Item => 100.0 * Load, Aft => 2, Exp => 0);
@@ -80,7 +83,7 @@ procedure Example_CPU_Load is
     exception
         --  The value does not fit in the buffer
         when others =>
-            return Colour & Name & " n/a" & Reset;
+            return Unreadable;
     end Image;
 
     --  This program's own process number

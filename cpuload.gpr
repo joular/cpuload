@@ -3,7 +3,9 @@ library project CpuLoad is
     --  The system to build for is picked from the target gprbuild reports, and -XPJ_OS overrides it
     Host_Target := project'Target;
 
-    Default_OS := "unknown";
+    --  No body of CPU_Load.Platform is written for a target that matches none of the cases below
+    --  The value stays as it is here, which OS_Platform does not allow, so gprbuild stops at that line and says so
+    Default_OS := "UNSUPPORTED-TARGET--build-again-with--XPJ_OS=linux-or-macos-or-windows";
 
     case Host_Target is
         when "aarch64-darwin" | "x86_64-darwin" | "x86-darwin" | "arm-darwin" | "ppc-darwin"
@@ -18,12 +20,12 @@ library project CpuLoad is
             => Default_OS := "linux";
 
         when others
-            => Default_OS := "unknown";
+            => null;
     end case;
 
     -- Symbols to indicate which OS to compile for
     -- Build with: gprbuild -XPJ_OS=windows
-    type OS_Platform is ("linux", "windows", "macos", "unknown"); --, "bsd");
+    type OS_Platform is ("linux", "windows", "macos"); --, "bsd");
     PJ_OS : OS_Platform := external ("PJ_OS", Default_OS);
 
     -- Default platform directory for each CPU load implementation
@@ -46,10 +48,6 @@ library project CpuLoad is
             Platform_Dir := "src/macos";
             Defines := ("-gnateDPJ_LINUX=False", "-gnateDPJ_WINDOWS=False",
                         "-gnateDPJ_MACOS=True");
-        when "unknown" =>
-            --  No body of CPU_Load.Platform is written for this machine's target
-            --  This directory does not exist, so gprbuild stops here
-            Platform_Dir := "src/UNSUPPORTED-TARGET--build-again-with--XPJ_OS=linux-or-macos-or-windows";
 --        when "bsd" =>
 --            Platform_Dir := "src/bsd";
     end case;
@@ -91,8 +89,6 @@ library project CpuLoad is
                     for Library_Options use ("-lpsapi");
                 when "macos" =>
                     -- Nothing to add: the counters the library reads are in libSystem, which every program links already
-                    null;
-                when "unknown" =>
                     null;
             end case;
 

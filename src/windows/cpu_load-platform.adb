@@ -135,7 +135,7 @@ package body CPU_Load.Platform is
 
     -- Measure a specific PID CPU time, in nanoseconds
     -- Returns Not_Read if the process does not exist, has stopped, or Windows will not open it, which it will not for another user's processes
-    function Ticks_Of_PID (PID : in Process_ID) return Integer_64 is
+    function Used_By_PID (PID : in Process_ID) return Integer_64 is
         Process : Handle := Invalid_Handle;
         Ignored : BOOL;
 
@@ -172,15 +172,15 @@ package body CPU_Load.Platform is
             end if;
 
             return Not_Read;
-    end Ticks_Of_PID;
+    end Used_By_PID;
 
     --------------------------------------------------
 
     -- Measure the CPU time of one process, but only if its program is the one named
     -- Returns 0 if it runs another program, and Not_Read if it runs this one and would not say how much it used
     -- The process is opened once here for both questions, and asking the name first is what keeps this cheap: a process that is not the one wanted is never asked for its times
-    function Ticks_If_Named (PID : in Process_ID;
-                             App_Name : in String) return Integer_64 is
+    function Used_If_Named (PID : in Process_ID;
+                            App_Name : in String) return Integer_64 is
         use GNAT.Directory_Operations;
         use Ada.Strings.UTF_Encoding.Wide_Strings;
 
@@ -232,7 +232,7 @@ package body CPU_Load.Platform is
             end if;
 
             return 0;
-    end Ticks_If_Named;
+    end Used_If_Named;
 
     --------------------------------------------------
 
@@ -241,7 +241,7 @@ package body CPU_Load.Platform is
                         Count : in Natural;
                         App_Name : in String) return Integer_64 is
         Result : Integer_64 := 0;
-        Unread : Natural := 0;
+        Unread : Boolean := False;
     begin
         for Walked in Numbers'First .. Numbers'First + Count - 1 loop
             -- Number 0 is the idle process, and a number too large for a Process_ID is not a valid one
@@ -250,10 +250,10 @@ package body CPU_Load.Platform is
             then
                 declare
                     Used : constant Integer_64 :=
-                        Ticks_If_Named (Process_ID (Numbers (Walked)), App_Name);
+                        Used_If_Named (Process_ID (Numbers (Walked)), App_Name);
                 begin
                     if Used = Not_Read then
-                        Unread := Unread + 1;
+                        Unread := True;
                     else
                         Result := Result + Used;
                     end if;
@@ -261,13 +261,7 @@ package body CPU_Load.Platform is
             end if;
         end loop;
 
-        -- Processes of the application are running and would not say how much they used
-        -- A sum of zero would read as an application sitting idle, which is not what was found out here
-        if Unread > 0 and then Result = 0 then
-            return Not_Read;
-        end if;
-
-        return Result;
+        return Sum_Or_Not_Read (Result, Unread);
     end Sum_Named;
 
     --------------------------------------------------

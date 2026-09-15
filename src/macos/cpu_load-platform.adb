@@ -11,6 +11,7 @@
 
 with Interfaces.C;
 with System;
+with System.Multiprocessors;
 with Ada.Characters.Handling;
 with Ada.Unchecked_Deallocation;
 with GNAT.Directory_Operations;
@@ -82,7 +83,9 @@ package body CPU_Load.Platform is
         end record
         with Convention => C;
 
-    -- macOS needs this as 96 bytes, laid out here rather than left to the compiler and checked afterwards, so it cannot come out any other way
+    -- macOS needs this as 96 bytes: the layout below is pinned to that number rather than left to the compiler and checked afterwards, and it is also the room the machine is told it has
+    Task_Times_Bytes : constant Interfaces.C.int := 96;
+
     for Task_Times use
         record
             Virtual_Size at 0 range 0 .. 63;
@@ -92,9 +95,7 @@ package body CPU_Load.Platform is
             Rest at 32 range 0 .. 511;
         end record;
 
-    for Task_Times'Size use 96 * 8;
-
-    Task_Times_Bytes : constant Interfaces.C.int := Task_Times'Object_Size / 8;
+    for Task_Times'Size use Task_Times_Bytes * 8;
 
     -- How the machine's own time units turn into nanoseconds: multiply by the first, divide by the second
     type Timebase is
@@ -174,10 +175,15 @@ package body CPU_Load.Platform is
 
     --------------------------------------------------
 
-    -- What the forward-only clock reads, in nanoseconds; only differences between two mean anything
+    -- How many CPUs the machine counts, asked once as it does not change while the machine is running
+    -- macOS alone needs it, the total here coming from a clock rather than from a counter of the machine's own
+    Cores : constant Integer_64 :=
+        Integer_64 (System.Multiprocessors.Number_Of_CPUs);
+
+    -- The machine's own time units turned into nanoseconds, the one place that conversion is done
     -- Multiplied before divided, so the fraction is not lost on the way
-    function Monotonic_Nanoseconds return Integer_64 is
-        (Integer_64 (Mach_Now)
+    function In_Nanoseconds (Units : in Integer_64) return Integer_64 is
+        (Units
          * Integer_64 (Time_Unit.Numerator)
          / Integer_64 (Time_Unit.Denominator));
 
@@ -213,7 +219,7 @@ package body CPU_Load.Platform is
 
     -- Measure a specific PID CPU time, in nanoseconds
     -- Returns Not_Read if the process does not exist, has stopped, or belongs to another user: the machine only tells root about those, and it refuses about a third of what is running on a Mac of a usual size
-    function Ticks_Of_PID (PID : in Process_ID) return Integer_64 is
+    function Used_By_PID (PID : in Process_ID) return Integer_64 is
         Times : Task_Times;
     begin
         -- The machine writes the whole record or nothing at all
@@ -227,14 +233,12 @@ package body CPU_Load.Platform is
         end if;
 
         -- A process is counted in the machine's own time units, so they are turned into nanoseconds
-        -- Multiplied before divided, so the fraction is not lost on the way
-        return (Integer_64 (Times.Total_User) + Integer_64 (Times.Total_System))
-               * Integer_64 (Time_Unit.Numerator)
-               / Integer_64 (Time_Unit.Denominator);
+        return In_Nanoseconds (Integer_64 (Times.Total_User)
+                               + Integer_64 (Times.Total_System));
     exception
         when others =>
             return Not_Read;
-    end Ticks_Of_PID;
+    end Used_By_PID;
 
     --------------------------------------------------
 
@@ -245,7 +249,7 @@ package body CPU_Load.Platform is
                         Count : in Natural;
                         App_Name : in String) return Integer_64 is
         Result : Integer_64 := 0;
-        Unread : Natural := 0;
+        Unread : Boolean := False;
     begin
         for Walked in Numbers'First .. Numbers'First + Count - 1 loop
             -- Number 0 is the machine's own kernel, and a negative one is no process at all
@@ -256,10 +260,10 @@ package body CPU_Load.Platform is
             then
                 declare
                     Used : constant Integer_64 :=
-                        Ticks_Of_PID (Process_ID (Numbers (Walked)));
+                        Used_By_PID (Process_ID (Numbers (Walked)));
                 begin
                     if Used = Not_Read then
-                        Unread := Unread + 1;
+                        Unread := True;
                     else
                         Result := Result + Used;
                     end if;
@@ -267,13 +271,7 @@ package body CPU_Load.Platform is
             end if;
         end loop;
 
-        -- Processes of the application are running and would not say how much they used
-        -- A sum of zero would read as an application sitting idle, which is not what was found out here
-        if Unread > 0 and then Result = 0 then
-            return Not_Read;
-        end if;
-
-        return Result;
+        return Sum_Or_Not_Read (Result, Unread);
     end Sum_Named;
 
     --------------------------------------------------
@@ -348,8 +346,9 @@ package body CPU_Load.Platform is
                         + Integer_64 (Ticks (Nice_Time))) * Nanoseconds_Per_Tick;
 
         -- The CPU time the machine had to give over the same stretch
-        -- From the clock, not Idle_Time: macOS writes that about once every 90 ms, so two samples closer together than that would show no time passing at all
-        Result.Total := Monotonic_Nanoseconds * Cores;
+        -- From the forward-only clock, not Idle_Time: macOS writes that about once every 90 ms, so two samples closer together than that would show no time passing at all
+        -- Only the difference between two readings of the clock means anything, which is all System_Usage takes of it
+        Result.Total := In_Nanoseconds (Integer_64 (Mach_Now)) * Cores;
 
         return Result;
     exception

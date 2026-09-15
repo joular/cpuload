@@ -78,25 +78,24 @@ package body CPU_Load.Platform is
     -- Used for /proc/stat, /proc/pid/stat or /proc/pid/comm
     function Get_First_Line (Path : in String) return String is
         use GNAT.OS_Lib;
-        -- Open file in read mode
-        File : constant File_Descriptor := Open_Read (Path, Binary);
+        File : File_Descriptor := Invalid_FD;
         Buffer : String (1 .. 1_024);
         Read_Status : Integer;
         Ending : Natural; -- to store the index where the first line stops, or 0 if no end
     begin
+        -- Open file in read mode
+        -- Opened here rather than above, so the handler at the end of this function covers it as well
+        File := Open_Read (Path, Binary);
+
         -- Invalid descriptor for file
         if File = Invalid_FD then
             return "";
         end if;
 
-        begin
-            Read_Status := Read (File, Buffer'Address, Buffer'Length);
-        exception
-            when others =>
-                Read_Status := 0;
-        end;
+        Read_Status := Read (File, Buffer'Address, Buffer'Length);
 
         Close (File);
+        File := Invalid_FD;
 
         -- Failed to read the file
         if Read_Status <= 0 then
@@ -108,6 +107,13 @@ package body CPU_Load.Platform is
 
         -- Return first line
         return Buffer (1 .. (if Ending = 0 then Read_Status else Ending - 1));
+    exception
+        when others =>
+            if File /= Invalid_FD then
+                Close (File);
+            end if;
+
+            return "";
     end Get_First_Line;
 
     --------------------------------------------------
@@ -214,7 +220,7 @@ package body CPU_Load.Platform is
 
     -- Measure a specific PID CPU time, in nanoseconds
     -- Returns Not_Read if the process does not exist, has stopped, or its line cannot be read
-    function Ticks_Of_PID (PID : in Process_ID) return Integer_64 is
+    function Used_By_PID (PID : in Process_ID) return Integer_64 is
         -- /proc/pid/stat is one line, ex.:
         -- 4242 (bash) S 1 4242 4242 0 -1 4194304 512 0 0 0 37 5 0 0 ...
         Line : constant String := Get_First_Line (Proc_File (PID, "stat"));
@@ -248,7 +254,7 @@ package body CPU_Load.Platform is
     exception
         when others =>
             return Not_Read;
-    end Ticks_Of_PID;
+    end Used_By_PID;
 
     --------------------------------------------------
 
@@ -311,7 +317,7 @@ package body CPU_Load.Platform is
         use Ada.Characters.Handling;
 
         Result : Integer_64 := 0;
-        Unread : Natural := 0;
+        Unread : Boolean := False;
         Folder : Dir_Type;
 
         -- Read function fills a buffer with the number of actual content it read
@@ -346,11 +352,11 @@ package body CPU_Load.Platform is
                 -- Asking the name first is what keeps this cheap: a process that is not the one wanted is never asked for its times
                 if Program_Of (PID) = App_Name then
                     declare
-                        Used : constant Integer_64 := Ticks_Of_PID (PID);
+                        Used : constant Integer_64 := Used_By_PID (PID);
                     begin
                         -- A process of the application whose line could not be read is left out, and the sum is then short by however much it used
                         if Used = Not_Read then
-                            Unread := Unread + 1;
+                            Unread := True;
                         else
                             Result := Result + Used;
                         end if;
@@ -361,24 +367,14 @@ package body CPU_Load.Platform is
 
         Close (Folder);
 
-        -- Processes of the application are running and their lines could not be read
-        -- A sum of zero would read as an application sitting idle, which is not what was found out here
-        if Unread > 0 and then Result = 0 then
-            return Not_Read;
-        end if;
-
-        return Result;
+        return Sum_Or_Not_Read (Result, Unread);
     exception
         when others =>
             if Is_Open (Folder) then
                 Close (Folder);
             end if;
 
-            if Unread > 0 and then Result = 0 then
-                return Not_Read;
-            end if;
-
-            return Result;
+            return Sum_Or_Not_Read (Result, Unread);
     end Used_By_App;
 
 end CPU_Load.Platform;

@@ -35,7 +35,7 @@ package body CPU_Load is
     begin
         -- No PID, so return the machine's reading alone
         if PID /= 0 then
-            Result.Used := Platform.Ticks_Of_PID (PID);
+            Result.Used := Platform.Used_By_PID (PID);
         end if;
 
         return Result;

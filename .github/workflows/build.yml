@@ -22,7 +22,7 @@ jobs:
         shell: bash
         run: |
           crate=$(grep -m1 '^version' alire.toml | cut -d'"' -f2)
-          code=$(grep -A2 'Keep it the same as the version in alire.toml' src/cpu_load.ads \
+          code=$(grep -A3 'function Version return String is' src/cpu_load.ads \
                  | grep -o '"[0-9][^"]*"' | tr -d '"')
           echo "alire.toml: $crate    src/cpu_load.ads: $code"
           if [ -z "$crate" ] || [ "$crate" != "$code" ]; then

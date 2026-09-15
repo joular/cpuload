@@ -21,7 +21,7 @@
 --     Put (System_Usage (Before, After)); -- System CPU load
 --     Put (Process_Usage (Before, After)); -- Firefox's CPU load
 -- Both loads run from 0.0 to 1.0, and are a share of the whole machine rather than of one core: a process using all of one core of an eight core machine gives 0.125, not 1.0
--- Process_Usage gives a negative number when it could not be read process usage
+-- Process_Usage gives a negative number when the process usage could not be read at all
 
 with Interfaces; use Interfaces;
 
