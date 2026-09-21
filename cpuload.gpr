@@ -1,15 +1,26 @@
 library project CpuLoad is
 
-    --  Windows sets OS=Windows_NT; Linux/macOS/BSD leave it unset
-    type Host_OS_Kind is ("Windows_NT", "other");
-    Host_OS : Host_OS_Kind := external ("OS", "other");
+    --  The system to build for is picked from the target gprbuild reports, and -XPJ_OS overrides it
+    Host_Target := project'Target;
 
-    Default_OS := "linux";
-    case Host_OS is
-        when "Windows_NT"
+    --  No body of CPU_Load.Platform is written for a target that matches none of the cases below
+    --  The value stays as it is here, which OS_Platform does not allow, so gprbuild stops at that line and says so
+    Default_OS := "UNSUPPORTED-TARGET--build-again-with--XPJ_OS=linux-or-macos-or-windows";
+
+    case Host_Target is
+        when "aarch64-darwin" | "x86_64-darwin" | "x86-darwin" | "arm-darwin" | "ppc-darwin"
+            => Default_OS := "macos";
+
+        when "x86_64-windows" | "x86-windows"
             => Default_OS := "windows";
-        when "other"
+
+        when "x86_64-linux" | "x86-linux" | "aarch64-linux" | "arm-linux" | "armhf-linux"
+           | "ppc-linux" | "ppc64-linux" | "ia64-linux" | "e500v2-linux"
+           | "ppc-wrslinux" | "e500v2-wrslinux" | "x86-elinos" | "ppc-elinos"
             => Default_OS := "linux";
+
+        when others
+            => null;
     end case;
 
     -- Symbols to indicate which OS to compile for
@@ -20,13 +31,23 @@ library project CpuLoad is
     -- Default platform directory for each CPU load implementation
     Platform_Dir := "src/linux";
 
+    -- The library itself picks its OS by the source directory above rather than by these symbols
+    -- They are here for the projects that with this one, such as the example, which is one body of code for every OS and has to know which one it was built for
+    Defines := ();
+
     case PJ_OS is
         when "linux" =>
             Platform_Dir := "src/linux";
+            Defines := ("-gnateDPJ_LINUX=True", "-gnateDPJ_WINDOWS=False",
+                        "-gnateDPJ_MACOS=False");
         when "windows" =>
             Platform_Dir := "src/windows";
+            Defines := ("-gnateDPJ_LINUX=False", "-gnateDPJ_WINDOWS=True",
+                        "-gnateDPJ_MACOS=False");
         when "macos" =>
             Platform_Dir := "src/macos";
+            Defines := ("-gnateDPJ_LINUX=False", "-gnateDPJ_WINDOWS=False",
+                        "-gnateDPJ_MACOS=True");
 --        when "bsd" =>
 --            Platform_Dir := "src/bsd";
     end case;
@@ -86,7 +107,7 @@ library project CpuLoad is
     end Linker;
 
     package Compiler is
-        for Switches ("Ada") use ("-O3", "-gnat2012", "-gnatwa");
+        for Switches ("Ada") use ("-O2", "-gnat2012", "-gnatwa");
     end Compiler;
 
     package Binder is

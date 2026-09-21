@@ -1,4 +1,4 @@
-# <a href="https://www.noureddine.org/research/joular/"><img src="https://raw.githubusercontent.com/joular/.github/main/profile/joular.png" alt="Joular Project" width="64" /></a> CPU Load :bar_chart:
+# <a href="https://www.noureddine.org/research/joular/"><img src="https://raw.githubusercontent.com/joular/.github/main/profile/joular.png" alt="Joular Project" width="64" /></a> CPU Load
 
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPLv3-blue)](https://www.gnu.org/licenses/lgpl-3.0) [![Ada](https://img.shields.io/badge/Made%20with-Ada-blue)](https://www.adaic.org)
 
@@ -18,12 +18,29 @@ The library is thread-safe, written in Ada, and also provides a [C interface](in
 | One process, by its number | Linux | `utime` + `stime` of `/proc/<pid>/stat` |
 | One process, by its number | macOS | `proc_pidinfo`, the user and system time of the process |
 | One process, by its number | Windows | `OpenProcess` + `GetProcessTimes` |
-| An application, every process of it | Linux | `/proc` scanned, each process named by `/proc/<pid>/comm` |
+| An application, every process of it | Linux | `/proc` scanned, each process named by `/proc/<pid>/exe` |
 | An application, every process of it | macOS | `proc_listpids`, each process named by `proc_pidpath` |
 | An application, every process of it | Windows | `EnumProcesses` + `QueryFullProcessImageNameW` |
 
+Every OS matches the program the process actually runs, so `firefox` finds every process of Firefox, its content processes included. On macOS that is the program inside the bundle, so `firefox` finds the firefox inside `Firefox.app`. On Windows a trailing `.exe` is ignored, so `firefox` also finds `firefox.exe`.
+
+On Linux, a process whose `/proc/<pid>/exe` cannot be read (such as a kernel thread, which runs no program of its own, or another user's process) falls back on `/proc/<pid>/comm`. That one is the name the process gave itself rather than the name of its program (with a max size of 15 character), so such a process may go unmatched where its program name is longer than that or was changed while it ran.
+
 macOS is supported on Apple Silicon.
+
 BSD support is planned and will come in a future version.
+
+## :straight_ruler: Reading the numbers
+
+Every counter in a `Sample` is in **nanoseconds**, on every system. Both loads run from `0.0` to `1.0` and are a share of the **whole machine**, not of one core: a process using all of one core of an eight core machine reads `0.125`, not `1.0`.
+
+Sample recommendation is about a second apart. Linux counts a process in units of 10 ms and Windows in units of about 15 ms, so a shorter wait than that has too few of them in it to divide by. macOS counts in nanoseconds and reads well below a second.
+
+**A negative load means it could not be read at all**: not running, stopped, or not allowed to get the information needed. That is not the same as `0.0`, which means something that used no CPU time.
+
+For an application, a process that could not be read is left out of the sum, so the figure is short by what it used. The answer is negative only when some of the application's processes are running and none of them would say anything at all.
+
+Thread safety means these functions keep no state of their own, so any number of threads may call them at once. It does not mean two threads sampling the same thing see a consistent pair of readings as each caller holds its own samples.
 
 ## Building
 
@@ -36,23 +53,26 @@ alr build
 Or directly with GNAT:
 
 ```bash
-gprbuild -P cpuload.gpr -XPJ_OS=macos
+gprbuild -P cpuload.gpr
 ```
 
-The build produces a static library by default. `-XPJ_OS` says which system to build for: `linux`, `macos` or `windows`. Windows is the only one recognised on its own, as nothing tells macOS from Linux at build time, so **pass `-XPJ_OS` yourself on the other two**. Alire sets it on its own, and so do the Makefiles of the examples, which ask `uname`. A library built for another system reads no counters at all and reports 0% for everything.
+The build produces a static library by default, and detects the system on its own: Linux, macOS and Windows are each recognised from the target gprbuild reports, so nothing has to be passed. `-XPJ_OS` still says which system to build for (`linux`, `macos` or `windows`) when it is not the one of the machine building it. Alire sets it too, and so do the Makefiles of the examples, which ask `uname`. A library built for another system reads no counters at all and reports 0% for everything.
 
 For other library types (shared, etc.), set `-XCPULOAD_LIBRARY_TYPE`:
 
 ```bash
-gprbuild -P cpuload.gpr -XPJ_OS=macos -XCPULOAD_LIBRARY_TYPE=relocatable
+gprbuild -P cpuload.gpr -XCPULOAD_LIBRARY_TYPE=relocatable
 ```
 
 `relocatable` builds the shared library (`libCPU_Load.so` / `.dll` / `.dylib`) that carries the C interface and is standalone: it starts itself up when loaded. On Linux and Windows it is encapsulated as well, carrying the Ada runtime with it, so it is one self-contained file.
 gprbuild cannot encapsulate on macOS, so the library reads the Ada runtime from its own file there, and looks for it next to itself. Copy it in once the library is built (the Makefiles of the examples do this for you):
 
 ```bash
-cp "$(gnatls -v | grep adalib | tr -d ' ')"/libgnat-*.dylib lib/relocatable/
+ADALIB="$(gnatls -v | grep adalib | tr -d ' ')"
+cp "$ADALIB"/libgnat-*.dylib "$ADALIB"/../../../../libgcc_s*.dylib lib/relocatable/
 ```
+
+Both are needed. `otool -L lib/relocatable/libCPU_Load.dylib` lists every `@rpath/` entry the library goes looking for, which is the reliable way to check if anything is missing: on the machine that built it those also resolve through the toolchain's own absolute paths, so a library that runs there may still fail to load anywhere else.
 
 ## Using from Ada
 
@@ -79,16 +99,24 @@ begin
 end Measure;
 ```
 
-The whole interface is five functions: `Sample`, the three `Take` functions (the system alone, one `Process_ID`, or an application by name), and the two functions that compare a pair of samples.
+The whole interface is `Sample`, the three `Take` functions (the system alone, one `Process_ID`, or an application by name), the two that measure one thing against a machine sample already taken, and the two that compare a pair of samples.
+
+To follow several things at once, read the machine once and measure each of them against that one reading. Each is then measured over exactly the same period of time, and the machine's counters are read once instead of once per thing:
+
+```ada
+Machine := Take;
+Ours := Take (Our_PID, Machine);
+Theirs := Take ("firefox", Machine);
+```
 
 A full example program is in [example/src/example_cpu_load.adb](example/src/example_cpu_load.adb). It follows the machine, itself, and an application named on the command line, once per second until stopped with Ctrl+C:
 
 ```bash
-gprbuild -P example/example.gpr -XPJ_OS=macos -p
+gprbuild -P example/example.gpr -p
 ./example/example_cpu_load firefox
 ```
 
-Give `-XPJ_OS` here too: the example builds the library with it, and one built for another system reads no counters at all and reports 0% for everything.
+The counters need no particular rights on any of the three systems. When the machine reads nothing at all, the example says what to look into on the system it was built for.
 
 With Alire, add the library to your project with `alr with cpuload`.
 
@@ -109,6 +137,16 @@ printf("machine: %.2f%%\n", 100.0 * cpuload_system_usage(&before, &after));
 printf("firefox: %.2f%%\n", 100.0 * cpuload_process_usage(&before, &after));
 ```
 
+`cpuload_take_pid_with` and `cpuload_take_app_with` are the same as `cpuload_take_pid` and `cpuload_take_app`, but measure against a machine sample already taken instead of taking another one:
+
+```c
+cpuload_sample machine, mine, theirs;
+
+cpuload_take_system(&machine);
+cpuload_take_pid_with(getpid(), &machine, &mine);
+cpuload_take_app_with("firefox", &machine, &theirs);
+```
+
 A full example program is in [example/c/main.c](example/c/main.c). Like the Ada one, it follows the machine, itself, and an application named on the command line, once per second until stopped with Ctrl+C. It comes with a [Makefile](example/c/Makefile) that builds the shared library and the program:
 
 ```bash
@@ -118,7 +156,7 @@ make -C example/c run APP=firefox
 To build it by hand instead, from the root of the repository, first compile the library:
 
 ```bash
-gprbuild -P cpuload.gpr -XPJ_OS=macos -XCPULOAD_LIBRARY_TYPE=relocatable
+gprbuild -P cpuload.gpr -XCPULOAD_LIBRARY_TYPE=relocatable
 ```
 
 Then compile the C program:
@@ -154,13 +192,19 @@ print("machine:", 100.0 * lib.cpuload_system_usage(ctypes.byref(before), ctypes.
 print("firefox:", 100.0 * lib.cpuload_process_usage(ctypes.byref(before), ctypes.byref(after)), "%")
 ```
 
+`cpuload_take_pid_with` and `cpuload_take_app_with` are there as well, taking the machine sample as their middle argument. [example/python/main.py](example/python/main.py) uses them, and declares the types of every function it calls, which ctypes needs to keep the `double` values whole on the way back.
+
 Note that Python puts its own Ctrl+C handler back after loading the library if you want to stop a reading loop that way: the Ada runtime installs its own while it starts up.
 
 Java (through FFM or JNA), Rust (through `libloading` or FFI declarations), and every other language with a C FFI work the same way.
 
 ## Adding a new OS
 
-The package spec [src/cpu_load.ads](src/cpu_load.ads) is shared by every OS, and holds the usage functions. Each OS brings its own body of the three `Take` functions ([src/linux](src/linux/cpu_load.adb), [src/macos](src/macos/cpu_load.adb), [src/windows](src/windows/cpu_load.adb)), and [cpuload.gpr](cpuload.gpr) picks the folder for the OS being built from the `PJ_OS` symbol. To support a new OS, write the implementation body and add its folder there.
+The package spec [src/cpu_load.ads](src/cpu_load.ads) and its body [src/cpu_load.adb](src/cpu_load.adb) are shared by every OS, and hold the `Take` and usage functions.
+
+Each OS brings its own body of [src/cpu_load-platform.ads](src/cpu_load-platform.ads), which is the specific OS code: `Measure_System`, `Ticks_Of_PID` and `Used_By_App`. One body per OS lives in [src/linux](src/linux/cpu_load-platform.adb), [src/macos](src/macos/cpu_load-platform.adb) and [src/windows](src/windows/cpu_load-platform.adb), and [cpuload.gpr](cpuload.gpr) picks the folder for the OS being built from the `PJ_OS` symbol.
+
+To support a new OS, write a body of `CPU_Load.Platform` for it and add its folder there.
 
 ## 📜 License
 

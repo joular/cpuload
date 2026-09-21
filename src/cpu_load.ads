@@ -20,6 +20,8 @@
 --     After := Take ("firefox");
 --     Put (System_Usage (Before, After)); -- System CPU load
 --     Put (Process_Usage (Before, After)); -- Firefox's CPU load
+-- Both loads run from 0.0 to 1.0, and are a share of the whole machine rather than of one core: a process using all of one core of an eight core machine gives 0.125, not 1.0
+-- Process_Usage gives a negative number when the process usage could not be read at all
 
 with Interfaces; use Interfaces;
 
@@ -28,10 +30,12 @@ package CPU_Load is
     -- Type for Process ID
     subtype Process_ID is Natural;
 
-    -- A sample reading
-    -- Busy: machine time spend doing something
-    -- Total: total machine time (busy + idle)
+    -- A sample reading counted in nanoseconds on every OS
+    -- Busy: machine time spent doing something, added up over every core
+    -- Total: the machine time there was to spend (the time that elapsed multiplied by the number of cores)
     -- Used: CPU time of the process or application monitored (0 if only monitoring the entire system)
+    -- A negative Used value means time could not be read at all, which Process_Usage answers with a negative load
+    -- A Total of 0 is the library saying the sample could not be taken at all
     type Sample is
         record
             Busy : Integer_64 := 0;
@@ -46,11 +50,20 @@ package CPU_Load is
     function Take (PID : in Process_ID) return Sample;
 
     -- Take a sample of an application (all of its PIDs)
-    -- On Linux, application name is case-insensitive but with exact match
-    -- On macOS, also case-insensitive with exact match, on the name of the program itself, so "firefox" matches the firefox inside Firefox.app
+    -- The application is named by its program, without the folders leading to it, matched exactly and without regard to case
+    -- On Linux, the program the process runs, so "firefox" matches every process of Firefox, its content processes included
+    -- On macOS, the same, on the name of the program itself, so "firefox" matches the firefox inside Firefox.app
     -- On Windows, also, the trailing ".exe" is ignored (so "firefox" will also match "firefox.exe")
     -- An empty string means taking a sample reading of the entire system only
     function Take (App : in String) return Sample;
+
+    -- The same two, but against a machine sample already taken instead of taking another one
+    -- Several things are then measured over exactly the same stretch of time, and the machine's counters are read once instead of once per thing
+    --     Machine := Take;
+    --     Ours := Take (Our_PID, Machine);
+    --     Theirs := Take ("firefox", Machine);
+    function Take (PID : in Process_ID; Machine : in Sample) return Sample;
+    function Take (App : in String; Machine : in Sample) return Sample;
 
     -- Calculate the CPU load of the entire system (for any sample taken, PID, entire system or application)
     function System_Usage (Before, After : in Sample) return Long_Float is
@@ -66,11 +79,17 @@ package CPU_Load is
         ;
     
     -- Calculate the CPU load of the process or the application
+    -- A negative answer means the process or the application could not be read at all: it is not running, it has stopped, or the OS does not let us get the info needed
+    -- That is not the same as 0.0, which means something that used no CPU time
     function Process_Usage (Before, After : in Sample) return Long_Float is
-        (if Before.Total = 0
+        (if Before.Used < 0
+            or else After.Used < 0
+         then
+            -1.0
+         elsif Before.Total = 0
             or else After.Total <= Before.Total
             or else After.Used <= Before.Used
-         then 
+         then
             0.0
          elsif After.Used - Before.Used >= After.Total - Before.Total
          then
@@ -82,7 +101,7 @@ package CPU_Load is
     function Version return String is
         (
             -- Keep it the same as the version in alire.toml
-            "0.0.2"
+            "0.0.3"
         );
 
 end CPU_Load;
