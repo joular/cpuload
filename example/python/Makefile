@@ -13,44 +13,25 @@ LIB_DIR = $(ROOT)/lib/relocatable
 # The application to follow when running the example
 APP =
 
-# Windows sets OS=Windows_NT, Linux and the others leave it unset
+# Windows sets OS=Windows_NT, the others leave it unset
 ifeq ($(OS),Windows_NT)
 
-    # Run the commands below in cmd, the shell every Windows machine has, so make behaves the same whether it was started from PowerShell or from cmd, and no Unix tools (bash, cp, rm) are needed
+    # cmd is the shell every Windows machine has, so make behaves the same from PowerShell or cmd, with no Unix tools needed
     SHELL = cmd.exe
     .SHELLFLAGS = /c
 
-    PJ_OS = windows
     PYTHON = python
 
-    # Windows has no way to record where the library is, but looks for it next to the program, so put a copy there
-    # The commands of cmd only accept backslashes in paths, hence the slashes of LIB_DIR turned around
+    # Windows looks for the library next to the program, so put a copy there (cmd only accepts backslashes)
     COPY_LIBRARY = copy /Y $(subst /,\,$(LIB_DIR))\*.dll .
 
-    CLEAN = del /Q *.dll & if exist __pycache__ rmdir /S /Q __pycache__
+    CLEAN = del /Q *.dll 2>nul & if exist __pycache__ rmdir /S /Q __pycache__
 
 else
 
-    # Nothing but Windows sets OS, so ask uname which of the others this is
-    ifeq ($(shell uname),Darwin)
-
-        PJ_OS = macos
-
-        # gprbuild cannot put the Ada runtime inside the library on macOS, and the library looks for it next to itself, so put a copy there
-        # libgcc_s is needed just as much and sits a few folders above adalib: otool -L on the built library lists every @rpath entry it goes looking for, and both of these are in it
-        ADALIB = $(shell gnatls -v | grep adalib | head -1 | tr -d ' ')
-        COPY_LIBRARY = cp -f $(ADALIB)/libgnat-*.dylib $(ADALIB)/../../../../libgcc_s*.dylib $(LIB_DIR)
-
-    else
-
-        PJ_OS = linux
-
-        # Linux records the folder of the Ada runtime inside the library, so nothing to copy
-        COPY_LIBRARY = true
-
-    endif
-
     PYTHON = python3
+
+    COPY_LIBRARY = true
 
     CLEAN = rm -f *.dll && rm -rf __pycache__
 
@@ -58,9 +39,9 @@ endif
 
 all: library
 
-# Build the shared library of CPU Load, which is the one holding the C interface ctypes calls
+# The shared library holds the C interface ctypes calls. The project file picks the OS on its own
 library:
-	gprbuild -P $(ROOT)/cpuload.gpr -XPJ_OS=$(PJ_OS) -XCPULOAD_LIBRARY_TYPE=relocatable -p
+	gprbuild -P $(ROOT)/cpuload.gpr -XCPULOAD_LIBRARY_TYPE=relocatable -p
 	$(COPY_LIBRARY)
 
 # Follow an application as well:  make run APP=firefox

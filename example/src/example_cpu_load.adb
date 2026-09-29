@@ -14,6 +14,9 @@
 --  Build and run it with (the system is detected on its own, -XPJ_OS overrides it: linux, macos or windows):
 --    gprbuild -P example/example.gpr -p
 --    ./example/example_cpu_load firefox
+--
+--  A number after the name stops the program after that many readings ("" follows no application):
+--    ./example/example_cpu_load "" 3
 
 with Ada.Command_Line; use Ada.Command_Line;
 with Ada.Strings; use Ada.Strings;
@@ -24,31 +27,26 @@ with GNAT.OS_Lib;
 
 with CPU_Load; use CPU_Load;
 
---  A Sample's counters are Integer_64, so comparing one needs its operators here
+--  use type: the Total = 0 check below compares Integer_64
 with Interfaces;
 use type Interfaces.Integer_64;
 
 procedure Example_CPU_Load is
 
-    --  Time between two samples
     Interval : constant Duration := 1.0;
 
-    --  Set to True when Ctrl+C is pressed, so the reading loop stops
-    --  Volatile, as it is written while the loop below is running
-    Stop_Asked : Boolean := False;
-    pragma Volatile (Stop_Asked);
+    --  Atomic, as the handler runs in another thread on Windows
+    Stop_Asked : Boolean := False with Atomic;
 
-    --  Called when Ctrl+C is pressed
-    --  It only asks the loop to stop: printing is not safe to do from a handler
+    --  Only asks the loop to stop: printing is not safe from a handler
     procedure On_Ctrl_C is
     begin
         Stop_Asked := True;
     end On_Ctrl_C;
 
-    --  Prints floats in plain digits rather than in exponent notation
     package Value_IO is new Ada.Text_IO.Float_IO (Long_Float);
 
-    --  ANSI escape sequences: cyan for the machine, magenta for this program, yellow for the application, green for the start up message
+    --  ANSI colours: cyan machine, magenta this program, yellow application, green ready, red trouble
     Escape : constant Character := ASCII.ESC;
     Reset : constant String := Escape & "[0m";
     Machine_Colour : constant String := Escape & "[1;36m";
@@ -57,20 +55,18 @@ procedure Example_CPU_Load is
     Ready_Colour : constant String := Escape & "[1;32m";
     Trouble_Colour : constant String := Escape & "[1;31m";
 
-    --  Goes back to the beginning of the line and erases it, so each reading overwrites the previous one instead of scrolling
+    --  Back to the start of the line and erase it, so each reading overwrites the last
     Clear_Line : constant String := ASCII.CR & Escape & "[2K";
 
-    --  Formats one load as a percentage with two decimals
-    --  A load is a share of the whole machine, so one core fully busy on an eight core machine reads 12.5%
+    --  A load is a share of the whole machine: one core fully busy out of eight reads 12.5%
     function Image (Colour : in String;
                     Name : in String;
                     Load : in Long_Float) return String is
         Machine_Share : String (1 .. 12);
 
-        --  What is printed when there is no reading to print
         Unreadable : constant String := Colour & Name & " n/a" & Reset;
     begin
-        --  A negative load indicated that the load could not be read or calculated: it is not running, it has stopped, or the system does not let this user look at it
+        --  Negative: the load could not be read (process gone, or not allowed)
         if Load < 0.0 then
             return Unreadable;
         end if;
@@ -86,18 +82,19 @@ procedure Example_CPU_Load is
             return Unreadable;
     end Image;
 
-    --  This program's own process number
-    --  No conversion: a PID from anywhere else is already a number
     Ours : constant Process_ID :=
         GNAT.OS_Lib.Pid_To_Integer (GNAT.OS_Lib.Current_Process_Id);
 
-    --  The application to follow, named on the command line
     --  No name given means no application is followed
     App : constant String :=
         (if Argument_Count >= 1 then Argument (1) else "");
 
-    --  The machine is read once per reading, and the other two are measured against that one reading
-    --  Each of the three is then measured over exactly the same stretch of time, and the machine's counters are read once a second rather than three times
+    --  How many readings to take before stopping, or zero to run until Ctrl+C
+    Wanted_Readings : constant Natural :=
+        (if Argument_Count >= 2 then Natural'Value (Argument (2)) else 0);
+    Taken : Natural := 0;
+
+    --  Read the machine once per loop so all three loads cover the same interval
     Machine_Before, Machine_After : Sample;
     Mine_Before, Mine_After : Sample;
     App_Before, App_After : Sample;
@@ -113,30 +110,28 @@ begin
         Put_Line ("Following the machine, this program, and " & App);
     end if;
 
-    --  Stop cleanly on Ctrl+C, instead of being killed on the spot
-    --  Unrestricted_Access is needed as the handler is declared inside this procedure rather than on its own
+    --  Unrestricted_Access: the handler is nested in this procedure
     GNAT.Ctrl_C.Install_Handler (On_Ctrl_C'Unrestricted_Access);
 
-    --  The first sample of each, which the first reading below is measured against
     Machine_Before := Take;
     Mine_Before := Take (Ours, Machine_Before);
     App_Before := Take (App, Machine_Before);
 
-    --  A Total of zero is the library saying it could not read the machine's counters at all
-    --  Without this it would show as a row of 0% every second, which looks like an idle machine rather than something to look into
+    --  Total 0: the counters could not be read; without this it would print 0% forever and look idle
     if Machine_Before.Total = 0 then
         Put_Line (Trouble_Colour
                   & "The machine's counters could not be read at all."
                   & Reset);
 
 #if PJ_MACOS then
-        Put_Line ("macOS is read through host_statistics, which needs no particular rights, so a Mac answering nothing means this was built for another system: build it again with -XPJ_OS=macos.");
+        Put_Line ("Was this built for another system? Rebuild with -XPJ_OS=macos");
 #elsif PJ_WINDOWS then
-        Put_Line ("Windows is read through GetSystemTimes, which needs no elevated terminal, so a machine answering nothing means this was built for another system: build it again with -XPJ_OS=windows.");
+        Put_Line ("Was this built for another system? Rebuild with -XPJ_OS=windows");
 #else
-        Put_Line ("Linux is read from the first line of /proc/stat, which any user reads, so /proc is not mounted here (a container or a chroot built without it), or this was built for another system: build it again with -XPJ_OS=linux.");
+        Put_Line ("Is /proc mounted? Otherwise rebuild with -XPJ_OS=linux");
 #end if;
 
+        Set_Exit_Status (Failure);
         return;
     end if;
 
@@ -164,13 +159,15 @@ begin
 
         Flush;
 
-        --  This reading becomes the one the next is measured against
         Machine_Before := Machine_After;
         Mine_Before := Mine_After;
         App_Before := App_After;
+
+        Taken := Taken + 1;
+        exit when Wanted_Readings > 0 and then Taken >= Wanted_Readings;
     end loop;
 
-    --  The readings are printed on a single line, so end it before printing anything else
+    --  The readings share one line; end it first
     New_Line;
     Put_Line (Ready_Colour & "Stopping" & Reset);
 end Example_CPU_Load;

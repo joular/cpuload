@@ -24,8 +24,7 @@ Or use the Makefile next to this file, which does both:
 
     make run APP=firefox
 
-Nothing has to be compiled here: ctypes calls the shared library directly.
-The C declarations these classes mirror are in include/cpuload.h.
+The C declarations mirrored here are in include/cpuload.h.
 """
 
 import ctypes
@@ -35,19 +34,15 @@ import sys
 import time
 from pathlib import Path
 
-# The root of the repository, holding the shared library built by gprbuild
+# Repository root, and where gprbuild puts the shared library
 ROOT = Path(__file__).resolve().parents[2]
 LIBRARY_DIR = ROOT / "lib" / "relocatable"
 
-# Time between two samples
 INTERVAL = 1.0
 
 
 class Sample(ctypes.Structure):
-    """The CPU counters at one moment, matches struct cpuload_sample.
-
-    The counters are 64 bits whatever the machine, so this never has to guess how wide they are.
-    """
+    """struct cpuload_sample: three int64_t on every machine."""
 
     _fields_ = [
         ("busy", ctypes.c_int64),   # machine time not spent idle
@@ -57,18 +52,17 @@ class Sample(ctypes.Structure):
 
 
 def library_names():
-    """The name the shared library takes on this OS."""
+    """The names the shared library may have on this OS."""
     if sys.platform == "win32":
-        return ("libCPU_Load.dll", "CPU_Load.dll")
+        return ("libcpuload.dll", "cpuload.dll")
     if sys.platform == "darwin":
-        return ("libCPU_Load.dylib",)
-    return ("libCPU_Load.so",)
+        return ("libcpuload.dylib",)
+    return ("libcpuload.so",)
 
 
 def find_library():
-    """The file holding the shared library, or a message on how to build it when there is none."""
-    # Look next to this program first, as Windows has no rpath and wants a copy
-    # of the DLL there, then in the folder gprbuild builds the library into
+    """The shared library's path; exits with build instructions if there is none."""
+    # Next to this program first: Windows has no rpath and wants a copy of the DLL there
     for folder in (Path(__file__).resolve().parent, LIBRARY_DIR):
         for name in library_names():
             candidate = folder / name
@@ -83,16 +77,16 @@ def find_library():
 
 
 def load_library():
-    """Loads the shared library, and declares the types of its functions.
+    """Loads the shared library and declares its function types.
 
-    ctypes assumes every function returns an int and takes anything, which would silently truncate the double values on the way back, so each one is declared.
+    ctypes defaults every result to int, which would silently truncate the doubles.
     """
     library_file = find_library()
 
     try:
         library = ctypes.CDLL(str(library_file))
     except OSError as error:
-        # Only the first line, which names what is missing: the loader follows it with every folder it looked into, which is pages long
+        # First line only: the loader follows it with every folder it searched
         sys.exit("CPU Load shared library found, but could not be loaded:\n"
                  "    {}".format(str(error).splitlines()[0]))
 
@@ -128,11 +122,9 @@ def load_library():
 
 
 def load_text(name, load):
-    """One load as a percentage of the whole machine.
+    """One load as a percentage of the whole machine: one core fully busy out of eight reads 12.5%.
 
-    A load is a share of the whole machine, so one core fully busy on an eight core machine reads 12.5%.
-
-    A negative load indicated that the load could not be read or calculated: it is not running, it has stopped, or the system does not let this user look at it
+    Negative: the load could not be read (process gone, or not allowed).
     """
     if load < 0.0:
         return "{} n/a".format(name)
@@ -143,20 +135,18 @@ def load_text(name, load):
 def main():
     library = load_library()
 
-    # The application to follow, named on the command line
-    # No name given means no application is followed, and NULL is what the library reads as no name
+    # No name given: follow no application (NULL is no name to the library)
     app = sys.argv[1].encode() if len(sys.argv) > 1 else None
 
     ours = os.getpid()
 
-    # The machine is read once per reading, and the other two are measured against that one reading
-    # Each of the three is then measured over exactly the same stretch of time, and the machine's counters are read once a second rather than three times
+    # Read the machine once per loop so all three loads cover the same interval
     machine_before, machine_after = Sample(), Sample()
     mine_before, mine_after = Sample(), Sample()
     app_before, app_after = Sample(), Sample()
 
-    # The Ada runtime inside the shared library installs its own Ctrl+C handler while it starts up, which takes the place of the one Python installed before it
-    # Putting Python's back here, after the library is loaded, is what makes Ctrl+C raise KeyboardInterrupt and stop the loop below
+    # The Ada runtime in the library installs its own Ctrl+C handler when loaded, replacing Python's
+    # Put Python's back so Ctrl+C raises KeyboardInterrupt
     signal.signal(signal.SIGINT, signal.default_int_handler)
 
     print("CPU Load", library.cpuload_version().decode())
@@ -167,13 +157,11 @@ def main():
     else:
         print("Following the machine, this program, and {}".format(app.decode()))
 
-    # The first sample of each, which the first reading below is measured against
     library.cpuload_take_system(ctypes.byref(machine_before))
     library.cpuload_take_pid_with(ours, ctypes.byref(machine_before), ctypes.byref(mine_before))
     library.cpuload_take_app_with(app, ctypes.byref(machine_before), ctypes.byref(app_before))
 
-    # A total of zero is the library saying it could not read the machine's counters at all
-    # It is what a library built for another system does here, and it would otherwise show as a row of 0% every second, which looks like an idle machine rather than a build to redo
+    # Total 0: the counters could not be read (e.g. a library built for another system); without this it would print 0% forever and look idle
     if machine_before.total == 0:
         sys.exit("The machine's counters could not be read at all."
                  " This is what a library built for another system does:"
@@ -196,15 +184,15 @@ def main():
                 line.append(load_text(app.decode(), library.cpuload_process_usage(
                     ctypes.byref(app_before), ctypes.byref(app_after))))
 
-            # flush so the readings still come out one per second when the output is piped into another program or into a file
+            # flush so piped output still comes out once a second
             print(*line, sep=" | ", flush=True)
 
-            # This reading becomes the one the next is measured against, as a copy of its own, so the next reading does not overwrite it
+            # Copies, so the next reading does not overwrite them
             machine_before = Sample.from_buffer_copy(machine_after)
             mine_before = Sample.from_buffer_copy(mine_after)
             app_before = Sample.from_buffer_copy(app_after)
     except KeyboardInterrupt:
-        # Ctrl+C interrupts the sleep above, so the loop stops here instead of being killed on the spot
+        # Ctrl+C interrupts the sleep above
         print("\nStopping")
 
 

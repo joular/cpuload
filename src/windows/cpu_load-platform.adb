@@ -18,20 +18,19 @@ with GNAT.Directory_Operations;
 
 package body CPU_Load.Platform is
 
-    -- Variables for Windows types
     subtype DWORD is Interfaces.C.unsigned;
     subtype BOOL is Interfaces.C.int;
     subtype Handle is System.Address;
-
-    Invalid_Handle : constant Handle := System.Null_Address;
 
     use type BOOL;
     use type DWORD;
     use type Handle;
 
-    -- A length of time in units of a hundred nanoseconds
-    -- Windows handles it as two halves, which needs to be put back together
-    -- Joined below turns one into nanoseconds, the unit every time in a Sample is counted in
+    Null_Handle : constant Handle := System.Null_Address;
+
+    PROCESS_QUERY_LIMITED_INFORMATION : constant DWORD := 16#1000#;
+
+    -- 100 ns units, in two halves
     type FILETIME is
         record
             Low : DWORD := 0;
@@ -39,7 +38,7 @@ package body CPU_Load.Platform is
         end record
         with Convention => C;
 
-    -- Windows needs this as 8 bytes, laid out here rather than left to the compiler and checked afterwards, so it cannot come out any other way
+    -- Must match the Windows struct: 8 bytes, Low first
     for FILETIME use
         record
             Low at 0 range 0 .. 31;
@@ -48,79 +47,58 @@ package body CPU_Load.Platform is
 
     for FILETIME'Size use 64;
 
-    -- A wide character in Windows is sixteen bits
     pragma Compile_Time_Error
         (Wide_Character'Size /= 16,
          "Wide_Character must be 16 bits to pass a buffer to Windows");
 
-    Query_Limited_Information : constant DWORD := 16#1000#;
-
-    -- How many processes one list holds, and how many the largest one ever asked for holds
-    -- The first is taken on the stack and is what every machine of a usual size takes; the second is only reached by a machine running more processes than that, and is taken off the heap
-    Room_For : constant := 4096;
-    Max_Processes : constant := 65_536;
-
-    Bytes_Per_Number : constant := DWORD'Size / 8;
-
-    -- Windows writes a program's path as wide characters, and this holds all but the very longest of them
-    -- A path may reach 32767 characters once long paths are turned on, and a process whose path is longer than this is passed over
-    Path_Max : constant := 4_096;
-
-    type Number_Array is array (Positive range <>) of aliased DWORD;
-    type Number_Array_Access is access Number_Array;
-
-    procedure Free is
-        new Ada.Unchecked_Deallocation (Number_Array, Number_Array_Access);
-
     --------------------------------------------------
 
-    -- Windows helper functions
     function Get_System_Times (Idle : access FILETIME;
                                Kernel : access FILETIME;
                                User : access FILETIME) return BOOL
         with Import, Convention => Stdcall, External_Name => "GetSystemTimes";
 
-    function Open_Process (Access_Wanted : in DWORD;
-                           Inherit : in BOOL;
+    function Open_Process (Desired_Access : in DWORD;
+                           Inherit_Handle : in BOOL;
                            PID : in DWORD) return Handle
         with Import, Convention => Stdcall, External_Name => "OpenProcess";
 
     function Get_Process_Times (Process : in Handle;
-                                Created : access FILETIME;
+                                Creation : access FILETIME;
                                 Finished : access FILETIME;
                                 Kernel : access FILETIME;
                                 User : access FILETIME) return BOOL
         with Import, Convention => Stdcall, External_Name => "GetProcessTimes";
 
-    function Close_Handle (Object : in Handle) return BOOL
+    -- The BOOL result is dropped: nothing to do about a handle that will not close
+    procedure Close_Handle (Object : in Handle)
         with Import, Convention => Stdcall, External_Name => "CloseHandle";
 
-    -- Fill the array with process numbers
-    function Enum_Processes (Into : in System.Address;
-                             Room : in DWORD;
-                             Filled : access DWORD) return BOOL
+    function Enum_Processes (PIDs : in System.Address;
+                             Size : in DWORD;
+                             Bytes_Returned : access DWORD) return BOOL
         with Import, Convention => Stdcall, External_Name => "EnumProcesses";
 
-    -- The full path of a process's program, as wide characters
-    function Query_Image_Name (Process : in Handle;
-                               Flags : in DWORD;
-                               Buffer : in System.Address;
-                               Size : access DWORD) return BOOL
+    -- Size is in/out: room in the buffer, then characters written, NUL not counted
+    function Query_Full_Process_Image_Name (Process : in Handle;
+                                            Flags : in DWORD;
+                                            Name : in System.Address;
+                                            Size : access DWORD) return BOOL
         with Import, Convention => Stdcall,
              External_Name => "QueryFullProcessImageNameW";
 
-    -- Windows counts its times in units of a hundred nanoseconds
-    Nanoseconds_Per_Unit : constant := 100;
+    --------------------------------------------------
 
-    -- Join the two halves of a FILETIME as one number, in nanoseconds
-    -- 64 bits are needed: a Long_Integer is 32 bits on Windows, so 2 ** 32 does not even fit in one
-    function Joined (Value : in FILETIME) return Integer_64 is
-        ((Integer_64 (Value.High) * 2 ** 32
-          + Integer_64 (Value.Low)) * Nanoseconds_Per_Unit);
+    -- Ten 100 ns units to a microsecond
+    function To_Microseconds (Time : in FILETIME) return Integer_64 is
+        ((Integer_64 (Time.High) * 2 ** 32 + Integer_64 (Time.Low)) / 10);
+
+    -- Null_Handle if the process is gone, or another user's
+    function Open_For_Query (PID : in Process_ID) return Handle is
+        (Open_Process (PROCESS_QUERY_LIMITED_INFORMATION, 0, DWORD (PID)));
 
     --------------------------------------------------
 
-    -- Get the plain name of the application (lowercase, remove trailing ".exe")
     function Plain_Name (Name : in String) return String is
         use Ada.Characters.Handling;
     begin
@@ -133,185 +111,34 @@ package body CPU_Load.Platform is
 
     --------------------------------------------------
 
-    -- Measure a specific PID CPU time, in nanoseconds
-    -- Returns Not_Read if the process does not exist, has stopped, or Windows will not open it, which it will not for another user's processes
-    function Used_By_PID (PID : in Process_ID) return Integer_64 is
-        Process : Handle := Invalid_Handle;
-        Ignored : BOOL;
-
-        Created, Finished, Kernel, User : aliased FILETIME;
-        Used : Integer_64 := Not_Read;
-    begin
-        Process := Open_Process (Access_Wanted => Query_Limited_Information,
-                                 Inherit => 0,
-                                 PID => DWORD (PID));
-
-        if Process = Invalid_Handle then
-            return Not_Read;
-        end if;
-
-        if Get_Process_Times (Process,
-                              Created'Access, Finished'Access,
-                              Kernel'Access, User'Access) /= 0
-        then
-            Used := Joined (Kernel) + Joined (User);
-        end if;
-
-        Ignored := Close_Handle (Process);
-
-        -- Forgotten as soon as it is given back, so the handler below never gives back a handle twice
-        -- The number of a handle just closed is Windows' to hand out again, and closing it a second time is closing whatever it now belongs to
-        Process := Invalid_Handle;
-
-        return Used;
-    exception
-        when others =>
-            if Process /= Invalid_Handle then
-                Ignored := Close_Handle (Process);
-                Process := Invalid_Handle;
-            end if;
-
-            return Not_Read;
-    end Used_By_PID;
-
-    --------------------------------------------------
-
-    -- Measure the CPU time of one process, but only if its program is the one named
-    -- Returns 0 if it runs another program, and Not_Read if it runs this one and would not say how much it used
-    -- The process is opened once here for both questions, and asking the name first is what keeps this cheap: a process that is not the one wanted is never asked for its times
-    function Used_If_Named (PID : in Process_ID;
-                            App_Name : in String) return Integer_64 is
-        use GNAT.Directory_Operations;
+    -- Program name without its folders, or "" if Windows will not say
+    function Program_Of (PID : in Process_ID) return String is
         use Ada.Strings.UTF_Encoding.Wide_Strings;
 
-        Process : Handle := Invalid_Handle;
-        Ignored : BOOL;
+        Process : constant Handle := Open_For_Query (PID);
 
-        Buffer : aliased Wide_String (1 .. Path_Max);
-        Room : aliased DWORD := Buffer'Length;
-
-        Created, Finished, Kernel, User : aliased FILETIME;
-        Used : Integer_64 := 0;
+        -- Paths longer than this (long-path mode, up to 32767) are skipped
+        Path : Wide_String (1 .. 4_096);
+        Length : aliased DWORD := Path'Length;
+        Success : BOOL;
     begin
-        Process := Open_Process (Access_Wanted => Query_Limited_Information,
-                                 Inherit => 0,
-                                 PID => DWORD (PID));
-
-        if Process = Invalid_Handle then
-            return 0;
+        if Process = Null_Handle then
+            return "";
         end if;
 
-        -- Windows writes the path and says how many characters it wrote, the closing NUL not counted
-        -- Encode is what turns those wide characters into a String, and it is also what may raise here, on a path holding one half of a character pair and not the other
-        if Query_Image_Name (Process, 0, Buffer'Address, Room'Access) /= 0
-           and then Room /= 0
-           and then Natural (Room) <= Buffer'Length
-           and then Plain_Name (Base_Name (Encode (Buffer (1 .. Natural (Room)))))
-                    = App_Name
-        then
-            -- It is the application's, so from here its time is either read or missing
-            if Get_Process_Times (Process,
-                                  Created'Access, Finished'Access,
-                                  Kernel'Access, User'Access) /= 0
-            then
-                Used := Joined (Kernel) + Joined (User);
-            else
-                Used := Not_Read;
-            end if;
+        Success := Query_Full_Process_Image_Name (Process, 0, Path'Address, Length'Access);
+        Close_Handle (Process);
+
+        if Success = 0 or else Length = 0 or else Length > Path'Length then
+            return "";
         end if;
 
-        Ignored := Close_Handle (Process);
-        Process := Invalid_Handle;
-
-        return Used;
-    exception
-        when others =>
-            if Process /= Invalid_Handle then
-                Ignored := Close_Handle (Process);
-                Process := Invalid_Handle;
-            end if;
-
-            return 0;
-    end Used_If_Named;
+        -- Encode raises on a lone surrogate; Runs catches it
+        return GNAT.Directory_Operations.Base_Name (Encode (Path (1 .. Natural (Length))));
+    end Program_Of;
 
     --------------------------------------------------
 
-    -- Add up the CPU time of every process of the application, out of the Count process numbers Windows listed
-    function Sum_Named (Numbers : in Number_Array;
-                        Count : in Natural;
-                        App_Name : in String) return Integer_64 is
-        Result : Integer_64 := 0;
-        Unread : Boolean := False;
-    begin
-        for Walked in Numbers'First .. Numbers'First + Count - 1 loop
-            -- Number 0 is the idle process, and a number too large for a Process_ID is not a valid one
-            if Numbers (Walked) > 0
-               and then Numbers (Walked) <= DWORD (Process_ID'Last)
-            then
-                declare
-                    Used : constant Integer_64 :=
-                        Used_If_Named (Process_ID (Numbers (Walked)), App_Name);
-                begin
-                    if Used = Not_Read then
-                        Unread := True;
-                    else
-                        Result := Result + Used;
-                    end if;
-                end;
-            end if;
-        end loop;
-
-        return Sum_Or_Not_Read (Result, Unread);
-    end Sum_Named;
-
-    --------------------------------------------------
-
-    -- The same, for a machine running more processes than a list on the stack holds
-    -- Only reached when the list came back filled to the brim, which is Windows saying there may be more of them, and which no machine of a usual size ever does
-    -- The list is taken twice as large until it comes back with room to spare, and off the heap, being too large for the stack by then
-    function Used_By_Many (App_Name : in String) return Integer_64 is
-        Capacity : Natural := Room_For * 2;
-        Numbers : Number_Array_Access;
-        Filled : aliased DWORD := 0;
-        Room : DWORD;
-        Result : Integer_64 := 0;
-    begin
-        loop
-            Numbers := new Number_Array (1 .. Capacity);
-            Room := DWORD (Capacity * Bytes_Per_Number);
-
-            if Enum_Processes (Into => Numbers.all (1)'Address,
-                               Room => Room,
-                               Filled => Filled'Access) = 0
-            then
-                Free (Numbers);
-                return Not_Read;
-            end if;
-
-            -- Room to spare, or as large a list as this will ever ask for: count what came back
-            if Filled < Room or else Capacity >= Max_Processes then
-                Result := Sum_Named (Numbers.all,
-                                     Natural (Filled) / Bytes_Per_Number,
-                                     App_Name);
-                Free (Numbers);
-                return Result;
-            end if;
-
-            -- Still full, so ask again with twice the room
-            Free (Numbers);
-            Capacity := Capacity * 2;
-        end loop;
-    exception
-        when others =>
-            -- Nothing is left behind, whatever went wrong above
-            -- Free does nothing at all when there is nothing left to free
-            Free (Numbers);
-            return Not_Read;
-    end Used_By_Many;
-
-    --------------------------------------------------
-
-    -- Measure CPU time of the entire system
     function Measure_System return Sample is
         Result : Sample;
         Idle, Kernel, User : aliased FILETIME;
@@ -320,10 +147,9 @@ package body CPU_Load.Platform is
             return Result;
         end if;
 
-        -- Windows counts the idle time inside kernel time
-        -- So the busy time is the total - the idle time
-        Result.Total := Joined (Kernel) + Joined (User);
-        Result.Busy := Integer_64'Max (Result.Total - Joined (Idle), 0);
+        -- Kernel time includes idle time
+        Result.Total := To_Microseconds (Kernel) + To_Microseconds (User);
+        Result.Busy := Integer_64'Max (Result.Total - To_Microseconds (Idle), 0);
 
         return Result;
     exception
@@ -333,32 +159,92 @@ package body CPU_Load.Platform is
 
     --------------------------------------------------
 
-    function Used_By_App (App : in String) return Integer_64 is
-        App_Name : constant String := Plain_Name (App);
-
-        -- The list every machine of a usual size fits in, taken on the stack
-        -- Left as it comes: Windows fills it, and only as much of it as Windows says it filled is ever read
-        Numbers : Number_Array (1 .. Room_For);
-        Filled : aliased DWORD := 0;
-        Room : constant DWORD := DWORD (Room_For * Bytes_Per_Number);
+    function Used_By_PID (PID : in Process_ID) return Integer_64 is
+        Process : constant Handle := Open_For_Query (PID);
+        Creation, Finished, Kernel, User : aliased FILETIME;
+        Success : BOOL;
     begin
-        if Enum_Processes (Into => Numbers'Address,
-                           Room => Room,
-                           Filled => Filled'Access) = 0
-        then
+        if Process = Null_Handle then
             return Not_Read;
         end if;
 
-        -- A list filled to the brim is Windows saying there may be more processes than fit in it
-        -- Anything short of that is all of them
-        if Filled = Room then
-            return Used_By_Many (App_Name);
+        Success := Get_Process_Times (Process,
+                                      Creation'Access, Finished'Access,
+                                      Kernel'Access, User'Access);
+        Close_Handle (Process);
+
+        if Success = 0 then
+            return Not_Read;
         end if;
 
-        return Sum_Named (Numbers, Natural (Filled) / Bytes_Per_Number, App_Name);
+        return To_Microseconds (Kernel) + To_Microseconds (User);
     exception
         when others =>
             return Not_Read;
-    end Used_By_App;
+    end Used_By_PID;
+
+    --------------------------------------------------
+
+    function Runs (PID : in Process_ID; App : in String) return Boolean is
+    begin
+        return Plain_Name (Program_Of (PID)) = Plain_Name (App);
+    exception
+        when others =>
+            return False;
+    end Runs;
+
+    --------------------------------------------------
+
+    type PID_List is array (Positive range <>) of DWORD;
+    type PID_List_Access is access PID_List;
+
+    procedure Free is new Ada.Unchecked_Deallocation (PID_List, PID_List_Access);
+
+    -- Processes past Max_Capacity are passed over
+    First_Capacity : constant := 4_096;
+    Max_Capacity : constant := 65_536;
+
+    PID_Bytes : constant := DWORD'Size / 8;
+
+    function For_Each_Process (Action : not null access procedure (PID : in Process_ID))
+        return Boolean is
+        Capacity : Positive := First_Capacity;
+        PIDs : PID_List_Access;
+        Room : DWORD;
+        Filled : aliased DWORD := 0;
+        Success : BOOL;
+    begin
+        -- A full list may be truncated, so retry with twice the room
+        loop
+            PIDs := new PID_List (1 .. Capacity);
+            Room := DWORD (Capacity * PID_Bytes);
+            Success := Enum_Processes (PIDs (1)'Address, Room, Filled'Access);
+
+            exit when Success = 0 or else Filled < Room or else Capacity >= Max_Capacity;
+
+            Free (PIDs);
+            Capacity := Capacity * 2;
+        end loop;
+
+        if Success = 0 then
+            Free (PIDs);
+            return False;
+        end if;
+
+        for PID of PIDs (1 .. Natural (Filled) / PID_Bytes) loop
+            -- PID 0 is the idle process
+            if PID in 1 .. DWORD (Process_ID'Last) then
+                Action (Process_ID (PID));
+            end if;
+        end loop;
+
+        Free (PIDs);
+        return True;
+    exception
+        when others =>
+            -- Free of null is a no-op
+            Free (PIDs);
+            return False;
+    end For_Each_Process;
 
 end CPU_Load.Platform;

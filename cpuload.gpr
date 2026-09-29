@@ -1,38 +1,37 @@
 library project CpuLoad is
 
-    --  The system to build for is picked from the target gprbuild reports, and -XPJ_OS overrides it
+    -- The OS to compile for, picked from the target gprbuild reports
+    -- Override with: gprbuild -XPJ_OS=windows
     Host_Target := project'Target;
+    Host_OS := external ("OS", "");
+    Default_OS := "linux";
 
-    --  No body of CPU_Load.Platform is written for a target that matches none of the cases below
-    --  The value stays as it is here, which OS_Platform does not allow, so gprbuild stops at that line and says so
-    Default_OS := "UNSUPPORTED-TARGET--build-again-with--XPJ_OS=linux-or-macos-or-windows";
-
+    -- The names are the canonical ones of gprconfig
     case Host_Target is
-        when "aarch64-darwin" | "x86_64-darwin" | "x86-darwin" | "arm-darwin" | "ppc-darwin"
-            => Default_OS := "macos";
-
         when "x86_64-windows" | "x86-windows"
             => Default_OS := "windows";
-
-        when "x86_64-linux" | "x86-linux" | "aarch64-linux" | "arm-linux" | "armhf-linux"
-           | "ppc-linux" | "ppc64-linux" | "ia64-linux" | "e500v2-linux"
-           | "ppc-wrslinux" | "e500v2-wrslinux" | "x86-elinos" | "ppc-elinos"
+        when "aarch64-darwin" | "x86_64-darwin" | "x86-darwin"
+            => Default_OS := "macos";
+        when "x86_64-linux" | "aarch64-linux" | "arm-linux" | "armhf-linux" | "x86-linux"
             => Default_OS := "linux";
-
-        when others
-            => null;
+        -- Not a value of OS_Platform on purpose, so the build stops here: CPU Load has no BSD body yet
+        when "x86_64-freebsd" | "aarch64-freebsd" | "x86-freebsd"
+           | "x86_64-netbsd" | "aarch64-netbsd" | "x86_64-dragonfly"
+            => Default_OS := "no-BSD-support-yet";
+        when others =>
+            -- A name not listed above: Windows says so in its environment, anything else is taken as Linux
+            case Host_OS is
+                when "Windows_NT" => Default_OS := "windows";
+                when others => null;
+            end case;
     end case;
 
-    -- Symbols to indicate which OS to compile for
-    -- Build with: gprbuild -XPJ_OS=windows
-    type OS_Platform is ("linux", "windows", "macos"); --, "bsd");
+    type OS_Platform is ("linux", "windows", "macos");
     PJ_OS : OS_Platform := external ("PJ_OS", Default_OS);
 
-    -- Default platform directory for each CPU load implementation
+    -- Code shared by every OS is in src, the body of CPU_Load.Platform for one OS in its own folder
+    -- Defines is for client projects such as the example; the library itself uses Platform_Dir
     Platform_Dir := "src/linux";
-
-    -- The library itself picks its OS by the source directory above rather than by these symbols
-    -- They are here for the projects that with this one, such as the example, which is one body of code for every OS and has to know which one it was built for
     Defines := ();
 
     case PJ_OS is
@@ -48,47 +47,50 @@ library project CpuLoad is
             Platform_Dir := "src/macos";
             Defines := ("-gnateDPJ_LINUX=False", "-gnateDPJ_WINDOWS=False",
                         "-gnateDPJ_MACOS=True");
---        when "bsd" =>
---            Platform_Dir := "src/bsd";
     end case;
 
-    -- Library type
-    -- static : libCPU_Load.a, linked into the client
-    -- relocatable : libCPU_Load.so / .dll / .dylib
-    -- static-pic : archive built position independent, so it can itself be linked into someone else's shared library
+    -- static : libcpuload.a, linked into the client
+    -- relocatable (shared) : libcpuload.so / .dll / .dylib, with the C interface
+    -- static-pic : archive built position independent, for someone else's shared library
     type Library_Type_Kind is ("static", "relocatable", "static-pic");
     Library_Type : Library_Type_Kind :=
         external ("CPULOAD_LIBRARY_TYPE", external ("LIBRARY_TYPE", "static"));
 
     for Languages use ("Ada");
-    for Library_Name use "CPU_Load";
+    for Library_Name use "cpuload";
     for Source_Dirs use ("src", Platform_Dir);
     for Object_Dir  use "obj/" & Library_Type;
     for Library_Dir use "lib/" & Library_Type;
     for Library_Kind use Library_Type;
     for Create_Missing_Dirs use "True";
 
-    -- The relocatable (shared) library is stand-alone: it starts itself up when loaded, so programs in other languages (C, Python, Java, Rust, etc.) can simply load it and call the functions of include/cpuload.h, with nothing else needed
-    -- It is encapsulated as well where it can be, meaning it carries the Ada runtime and is one self-contained file
+    -- Standalone so C, Python, etc. can load it with no setup; encapsulated where gprbuild can, to carry the Ada runtime
     case Library_Type is
         when "relocatable" =>
             for Library_Interface use ("CPU_Load", "CPU_Load.C_API");
+
             case PJ_OS is
                 when "macos" =>
-                    -- gprbuild cannot encapsulate on macOS, so the library loads the Ada runtime from its own file there
+                    -- gprbuild cannot encapsulate on macOS, so the library loads the Ada runtime from its own file
                     for Library_Standalone use "standard";
-                when others =>
+
+                    -- gprbuild 26 writes the runtime folder into the library with a space in front, which macOS never finds
+                    -- The specs file records that folder instead, so the library finds the runtime without DYLD_LIBRARY_PATH
+                    for Run_Path_Option use ();
+                    for Library_Options use ("-specs=" & project'Project_Dir & "src/macos/ada_runtime_rpath.specs");
+                when "windows" =>
+                    -- The DLL itself calls EnumProcesses, so it needs psapi too; Linker_Options below only applies to clients
+                    for Library_Standalone use "encapsulated";
+                    for Library_Options use ("-lpsapi");
+                when "linux" =>
                     for Library_Standalone use "encapsulated";
             end case;
 
+            -- The number is the ABI: bump it only when the C interface changes in an incompatible way
             case PJ_OS is
                 when "linux" =>
-                    for Library_Version use "libCPU_Load.so.0";
-                when "windows" =>
-                    -- Linker_Options below is for whoever links against this library, and it comes too late for the library itself: the DLL calls EnumProcesses, so it has to link psapi on its own
-                    for Library_Options use ("-lpsapi");
-                when "macos" =>
-                    -- Nothing to add: the counters the library reads are in libSystem, which every program links already
+                    for Library_Version use "libcpuload.so.0";
+                when others =>
                     null;
             end case;
 

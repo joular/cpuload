@@ -16,15 +16,19 @@
  *   make
  *   ./example_c firefox
  *
+ * A number after the name stops the program after that many readings ("" follows no application):
+ *   ./example_c "" 3
+ *
  * Or by hand, against the relocatable (shared) library, from the root of the repository:
  *   gprbuild -P cpuload.gpr -XCPULOAD_LIBRARY_TYPE=relocatable
- *   gcc example/c/main.c -Iinclude -Llib/relocatable -lCPU_Load -Wl,-rpath,"$PWD/lib/relocatable" -o example/c/example_c
+ *   gcc example/c/main.c -Iinclude -Llib/relocatable -lcpuload -Wl,-rpath,"$PWD/lib/relocatable" -o example/c/example_c
  *
- * -I is the folder holding cpuload.h, -L and -l the library to link with, and -rpath the folder where the program looks for the library when it runs
+ * -rpath is where the program looks for the library when it runs
  */
 
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -38,22 +42,18 @@
 
 #include "cpuload.h"
 
-/* Set to 1 when Ctrl+C is pressed, so the reading loop stops
- * volatile sig_atomic_t is the only type a signal handler may safely write */
+/* volatile sig_atomic_t is the only type a signal handler may safely write */
 static volatile sig_atomic_t stop_asked = 0;
 
-/* Called when Ctrl+C is pressed
- * It only asks the loop to stop, as printing is not safe to do from a signal handler */
+/* Only asks the loop to stop: printing is not safe in a signal handler */
 static void on_ctrl_c(int signal_number)
 {
     (void) signal_number;
     stop_asked = 1;
 }
 
-/* Prints one load as a percentage of the whole machine
- * A load is a share of the whole machine, so one core fully busy on an eight core machine reads 12.5%
- * A negative load indicated that the load could not be read or calculated: it is not running, it has stopped, or the system does not let this user look at it
- */
+/* A load is a share of the whole machine: one core fully busy out of eight reads 12.5%
+ * Negative: the load could not be read (process gone, or not allowed) */
 static void print_load(const char *name, double load)
 {
     if (load < 0.0)
@@ -64,14 +64,16 @@ static void print_load(const char *name, double load)
 
 int main(int argc, char **argv)
 {
-    /* The application to follow, named on the command line
-     * No name given means no application is followed */
-    const char *app = (argc > 1) ? argv[1] : NULL;
+    /* No name, or an empty one: follow no application */
+    const char *app = (argc > 1 && argv[1][0] != '\0') ? argv[1] : NULL;
+
+    /* How many readings to take before stopping, or zero to run until Ctrl+C */
+    int wanted = (argc > 2) ? atoi(argv[2]) : 0;
+    int taken = 0;
 
     unsigned int ours = current_pid();
 
-    /* The machine is read once per reading, and the other two are measured against that one reading
-     * Each of the three is then measured over exactly the same stretch of time, and the machine's counters are read once a second rather than three times */
+    /* Read the machine once per loop so all three loads cover the same interval */
     cpuload_sample machine_before, machine_after;
     cpuload_sample mine_before, mine_after;
     cpuload_sample app_before, app_after;
@@ -83,16 +85,13 @@ int main(int argc, char **argv)
     else
         printf("Following the machine, this program, and %s\n", app);
 
-    /* Stop cleanly on Ctrl+C, instead of being killed on the spot */
     signal(SIGINT, on_ctrl_c);
 
-    /* The first sample of each, which the first reading below is measured against */
     cpuload_take_system(&machine_before);
     cpuload_take_pid_with(ours, &machine_before, &mine_before);
     cpuload_take_app_with(app, &machine_before, &app_before);
 
-    /* A total of zero is the library saying it could not read the machine's counters at all
-     * It is what a library built for another system does here, and it would otherwise show as a row of 0% every second, which looks like an idle machine rather than a build to redo */
+    /* Total 0: the counters could not be read (e.g. a library built for another system); without this it would print 0% forever and look idle */
     if (machine_before.total == 0) {
         printf("The machine's counters could not be read at all."
                " This is what a library built for another system does:"
@@ -122,10 +121,12 @@ int main(int argc, char **argv)
 
         printf("\n");
 
-        /* This reading becomes the one the next is measured against */
         machine_before = machine_after;
         mine_before = mine_after;
         app_before = app_after;
+
+        if (wanted > 0 && ++taken >= wanted)
+            break;
     }
 
     printf("Stopping\n");
