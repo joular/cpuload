@@ -10,23 +10,21 @@ LIB_DIR = $(ROOT)/lib/relocatable
 
 CC = gcc
 CFLAGS = -O2 -Wall -I$(ROOT)/include
-LDFLAGS = -L$(LIB_DIR) -lCPU_Load
+LDFLAGS = -L$(LIB_DIR) -lcpuload
 
 # The application to follow when running the example
 APP =
 
-# Windows sets OS=Windows_NT, Linux and the others leave it unset
+# Windows sets OS=Windows_NT, the others leave it unset
 ifeq ($(OS),Windows_NT)
 
-    # Run the commands below in cmd, the shell every Windows machine has, so make behaves the same whether it was started from PowerShell or from cmd, and no Unix tools (bash, cp, rm) are needed
+    # cmd is the shell every Windows machine has, so make behaves the same from PowerShell or cmd, with no Unix tools needed
     SHELL = cmd.exe
     .SHELLFLAGS = /c
 
-    PJ_OS = windows
     EXE = example_c.exe
 
-    # Windows has no way to record where the library is, but looks for it next to the program, so put a copy there
-    # The commands of cmd only accept backslashes in paths, hence the slashes of LIB_DIR turned around
+    # Windows looks for the library next to the program, so put a copy there (cmd only accepts backslashes)
     COPY_LIBRARY = copy /Y $(subst /,\,$(LIB_DIR))\*.dll .
 
     RUN = .\$(EXE) $(APP)
@@ -34,29 +32,12 @@ ifeq ($(OS),Windows_NT)
 
 else
 
-    # Nothing but Windows sets OS, so ask uname which of the others this is
-    ifeq ($(shell uname),Darwin)
-
-        PJ_OS = macos
-
-        # gprbuild cannot put the Ada runtime inside the library on macOS, and the library looks for it next to itself, so put a copy there
-        # libgcc_s is needed just as much and sits a few folders above adalib: otool -L on the built library lists every @rpath entry it goes looking for, and both of these are in it
-        ADALIB = $(shell gnatls -v | grep adalib | head -1 | tr -d ' ')
-        COPY_LIBRARY = cp -f $(ADALIB)/libgnat-*.dylib $(ADALIB)/../../../../libgcc_s*.dylib $(LIB_DIR)
-
-    else
-
-        PJ_OS = linux
-
-        # The library carries the Ada runtime inside it, so nothing to copy
-        COPY_LIBRARY = true
-
-    endif
-
     EXE = example_c
 
     # Linux and macOS record the folder of the library inside the program, so it is found when running
     LDFLAGS += -Wl,-rpath,$(abspath $(LIB_DIR))
+
+    COPY_LIBRARY = true
 
     RUN = ./$(EXE) $(APP)
     DELETE = rm -f
@@ -65,10 +46,9 @@ endif
 
 all: library $(EXE)
 
-# Build the shared library of CPU Load, which is the one holding the C interface
-# The copy goes with the library and not with the program below: the program is only relinked when its own sources change, so a library rebuilt on its own would leave the copy behind and stale
+# The shared library holds the C interface. The project file picks the OS on its own
 library:
-	gprbuild -P $(ROOT)/cpuload.gpr -XPJ_OS=$(PJ_OS) -XCPULOAD_LIBRARY_TYPE=relocatable -p
+	gprbuild -P $(ROOT)/cpuload.gpr -XCPULOAD_LIBRARY_TYPE=relocatable -p
 	$(COPY_LIBRARY)
 
 $(EXE): main.c $(ROOT)/include/cpuload.h
@@ -81,7 +61,7 @@ run: all
 clean:
 	$(DELETE) example_c example_c.exe *.dll
 
-# Build the library before the example, even when asked to run several jobs at once
+# Build the library before the example, even with several jobs
 .NOTPARALLEL:
 
 .PHONY: all library run clean

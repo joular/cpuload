@@ -9,15 +9,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # macos-15-intel: Intel Macs (macos-26-intel is the last Intel image, macOS 26 being the last macOS for Intel Macs)
+        os: [ubuntu-latest, windows-latest, macos-latest, macos-15-intel]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
 
-      # Alire brings the GNAT toolchain, and picks PJ_OS for the system it runs on
+      # Use Alire for the GNAT toolchain, and picking PJ_OS for the system it runs on
       - uses: alire-project/setup-alire@v6
 
-      # cpuload_version() is part of the public C interface, so a release where it disagrees with the published crate version is a confusing bug. The two are kept in step by hand, so check them here
+      # cpuload_version() is a public C API, check for version mismatch with alire.toml
       - name: Check the version in alire.toml and in the library agree
         shell: bash
         run: |
@@ -51,7 +52,14 @@ jobs:
           choco install make --no-progress -y
           alr exec -- make -C example/c
 
-      # The Python example is not compiled, ctypes calls the shared library directly, so this only builds the library it loads and puts it where the example looks
-      # make is on every runner by this point, the Windows step above having installed it
+      # Nothing to compile for Python: this builds the library it loads
+      # make is on every runner by now: the Windows step above installed it
       - name: Build the library the Python example loads
         run: alr exec -- make -C example/python
+
+      # The examples take a number of readings after the application name ("" follows none) and stop
+      - name: Run the examples for a few readings
+        shell: bash
+        run: |
+          ./example/example_cpu_load "" 3
+          ./example/c/example_c "" 3

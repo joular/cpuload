@@ -9,99 +9,66 @@
 --  Author : Adel Noureddine
 --
 
--- CPU Load reports:
---     the system CPU usage
---     a specific process CPU usage
---     an application CPU usage (including all its processes, tracked on creation/destruction)
--- CPU Load works on Linux, macOS and Windows, and is thread-safe
--- How to use it: take a sample, wait, take another sample, calculate CPU load
+-- CPU Load reports the CPU usage of the system, of one process, or of an application (all of its processes running when each sample is taken)
+-- Works on Linux, macOS and Windows
+-- It keeps no state. Linked statically, it can be called from any number of Ada tasks. The shared library must be called from one thread or task at a time (see include/cpuload.h)
+-- Take a sample, wait, take another, compare:
 --     Before := Take ("firefox");
 --     delay 1.0;
 --     After := Take ("firefox");
 --     Put (System_Usage (Before, After)); -- System CPU load
 --     Put (Process_Usage (Before, After)); -- Firefox's CPU load
--- Both loads run from 0.0 to 1.0, and are a share of the whole machine rather than of one core: a process using all of one core of an eight core machine gives 0.125, not 1.0
--- Process_Usage gives a negative number when the process usage could not be read at all
+-- Loads run from 0.0 to 1.0 as a share of the whole machine, not of one core: all of one core out of eight gives 0.125
+-- Process_Usage is negative when the process could not be read at all
 
 with Interfaces; use Interfaces;
 
 package CPU_Load is
 
-    -- Type for Process ID
     subtype Process_ID is Natural;
 
-    -- A sample reading counted in nanoseconds on every OS
-    -- Busy: machine time spent doing something, added up over every core
-    -- Total: the machine time there was to spend (the time that elapsed multiplied by the number of cores)
-    -- Used: CPU time of the process or application monitored (0 if only monitoring the entire system)
-    -- A negative Used value means time could not be read at all, which Process_Usage answers with a negative load
-    -- A Total of 0 is the library saying the sample could not be taken at all
+    -- One reading, in microseconds on every OS
+    -- Busy: machine time not spent idle, summed over every core
+    -- Total: machine time there was to spend (elapsed time times the number of cores); 0 if the sample could not be taken
+    -- Used: CPU time of the process or application sampled, 0 for the system alone, negative if it could not be read
+    -- Same layout as struct cpuload_sample in include/cpuload.h
     type Sample is
         record
             Busy : Integer_64 := 0;
             Total : Integer_64 := 0;
             Used : Integer_64 := 0;
-        end record;
-    
-    -- Take a sample of the entire system only
+        end record
+        with Convention => C;
+
+    -- Sample the system alone
     function Take return Sample;
 
-    -- Take a sample of a specific process by its ID
+    -- Sample the system and one process
     function Take (PID : in Process_ID) return Sample;
 
-    -- Take a sample of an application (all of its PIDs)
-    -- The application is named by its program, without the folders leading to it, matched exactly and without regard to case
-    -- On Linux, the program the process runs, so "firefox" matches every process of Firefox, its content processes included
-    -- On macOS, the same, on the name of the program itself, so "firefox" matches the firefox inside Firefox.app
-    -- On Windows, also, the trailing ".exe" is ignored (so "firefox" will also match "firefox.exe")
-    -- An empty string means taking a sample reading of the entire system only
+    -- Sample the system and every process of an application
+    -- App is the program's name without its folders, matched exactly, case-insensitive; "" samples the system alone
+    -- Linux and macOS match the program the process runs: "firefox" matches every process of Firefox, and the firefox inside Firefox.app
+    -- Windows also ignores a trailing ".exe"
+    -- A process that ends between two samples takes its time out of the second one, so that stretch reads low, or 0.0
     function Take (App : in String) return Sample;
 
-    -- The same two, but against a machine sample already taken instead of taking another one
-    -- Several things are then measured over exactly the same stretch of time, and the machine's counters are read once instead of once per thing
+    -- The same two against a machine sample already taken: everything is measured over the same stretch, and the machine's counters are read once
     --     Machine := Take;
     --     Ours := Take (Our_PID, Machine);
     --     Theirs := Take ("firefox", Machine);
     function Take (PID : in Process_ID; Machine : in Sample) return Sample;
     function Take (App : in String; Machine : in Sample) return Sample;
 
-    -- Calculate the CPU load of the entire system (for any sample taken, PID, entire system or application)
-    function System_Usage (Before, After : in Sample) return Long_Float is
-        (if Before.Total = 0
-            or else After.Total <= Before.Total
-            or else After.Busy <= Before.Busy
-         then 
-            0.0
-         elsif After.Busy - Before.Busy >= After.Total - Before.Total
-         then
-            1.0
-         else Long_Float (After.Busy - Before.Busy) / Long_Float (After.Total - Before.Total))
-        ;
-    
-    -- Calculate the CPU load of the process or the application
-    -- A negative answer means the process or the application could not be read at all: it is not running, it has stopped, or the OS does not let us get the info needed
-    -- That is not the same as 0.0, which means something that used no CPU time
-    function Process_Usage (Before, After : in Sample) return Long_Float is
-        (if Before.Used < 0
-            or else After.Used < 0
-         then
-            -1.0
-         elsif Before.Total = 0
-            or else After.Total <= Before.Total
-            or else After.Used <= Before.Used
-         then
-            0.0
-         elsif After.Used - Before.Used >= After.Total - Before.Total
-         then
-            1.0
-         else Long_Float (After.Used - Before.Used) / Long_Float (After.Total - Before.Total)
-        );
-    
-    -- Return the version of the library as a String
-    function Version return String is
-        (
-            -- Keep it the same as the version in alire.toml
-            "0.0.3"
-        );
+    -- CPU load of the whole machine between two samples, 0.0 .. 1.0 (any kind of sample)
+    function System_Usage (Before, After : in Sample) return Long_Float;
+
+    -- CPU load of the process or application between two samples, 0.0 .. 1.0
+    -- Negative if it could not be read at all: not running, stopped, or the OS will not say. 0.0 is a real reading of no CPU time
+    -- An application that is not running reads 0.0; negative only when none of its running processes could be read
+    function Process_Usage (Before, After : in Sample) return Long_Float;
+
+    -- Keep it the same as the version in alire.toml
+    function Version return String is ("0.0.4");
 
 end CPU_Load;
