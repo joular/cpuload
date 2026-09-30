@@ -24,7 +24,7 @@ Every OS matches the program with the process that actually runs, so `firefox` f
 
 On Linux, a process whose `/proc/<pid>/exe` cannot be read (such as a kernel thread, which runs no program directly, or another user's process) falls back on `/proc/<pid>/comm`. This file have the given name of the process (with a max size of 15 character).
 
-macOS is supported on Apple Silicon, with the library built for arm64. An x86_64 build running under Rosetta reads process times about 40 times too low, so process and application loads come out close to 0%.
+macOS is supported on Apple Silicon and Intel Macs, with the library built for the chip it runs on. An x86_64 build running under Rosetta on an Apple Silicon Mac reads process times about 40 times too low, so process and application loads come out close to 0%.
 
 BSD support is planned and will come in a future version.
 
