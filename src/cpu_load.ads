@@ -48,7 +48,8 @@ package CPU_Load is
 
     -- Sample the system and every process of an application
     -- App is the program's name without its folders, matched exactly, case-insensitive; "" samples the system alone
-    -- Linux and macOS match the program the process runs: "firefox" matches every process of Firefox, and the firefox inside Firefox.app
+    -- Linux and macOS match the program the process runs: "firefox" matches every process of Firefox
+    -- macOS also matches every program inside Firefox.app, as its content processes run from a helper bundle in it
     -- Windows also ignores a trailing ".exe"
     -- A process that ends between two samples takes its time out of the second one, so that stretch reads low, or 0.0
     function Take (App : in String) return Sample;

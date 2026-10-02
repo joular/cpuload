@@ -20,7 +20,7 @@ The library is written in Ada, and also provides a [C interface](include/cpuload
 | An application, every process of it | macOS | `proc_listpids`, each process named by `proc_pidpath` |
 | An application, every process of it | Windows | `EnumProcesses` + `QueryFullProcessImageNameW` |
 
-Every OS matches the program with the process that actually runs, so `firefox` finds every process of Firefox, its content processes included. On macOS that is the program inside the bundle, so `firefox` finds the application inside `Firefox.app`. On Windows a trailing `.exe` is ignored, so `firefox` also finds `firefox.exe`.
+Every OS matches the program with the process that actually runs, so `firefox` finds every process of Firefox, its content processes included. On macOS that is the program inside the bundle, so `firefox` finds the application inside `Firefox.app`, and also every program inside `Firefox.app`: for example, its content processes run `plugin-container`, from a helper bundle inside it. On Windows a trailing `.exe` is ignored, so `firefox` also finds `firefox.exe`.
 
 On Linux, a process whose `/proc/<pid>/exe` cannot be read (such as a kernel thread, which runs no program directly, or another user's process) falls back on `/proc/<pid>/comm`. This file have the given name of the process (with a max size of 15 character).
 

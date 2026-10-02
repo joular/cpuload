@@ -54,7 +54,8 @@ void cpuload_take_system(cpuload_sample *out);
 void cpuload_take_pid(unsigned int pid, cpuload_sample *out);
 
 /* Take a sample of the system and of every process running the named application
- * The name is the program's own, without its folder, matched exactly and case insensitive: "firefox" finds every process of Firefox, and the firefox inside Firefox.app
+ * The name is the program's own, without its folder, matched exactly and case insensitive: "firefox" finds every process of Firefox
+ * On macOS every program inside Firefox.app is found too, as its content processes run from a helper bundle in it
  * On Windows a trailing ".exe" is ignored as well, and at most 65536 processes are read
  * A process that ends between two samples takes its time out of the second one, so that stretch reads low, or 0.0
  * A process that could not be read is left out of used, which is -1 only when none of them could be read
