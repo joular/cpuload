@@ -173,7 +173,8 @@ package body CPU_Load.Platform is
                                       Kernel'Access, User'Access);
         Close_Handle (Process);
 
-        if Success = 0 then
+        -- A process that has ended stays open to queries while a handle to it is held. Its exit time, zero until then, gives it away
+        if Success = 0 or else To_Microseconds (Finished) /= 0 then
             return Not_Read;
         end if;
 

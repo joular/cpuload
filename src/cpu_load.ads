@@ -64,7 +64,7 @@ package CPU_Load is
     function System_Usage (Before, After : in Sample) return Long_Float;
 
     -- CPU load of the process or application between two samples, 0.0 .. 1.0
-    -- Negative if it could not be read at all: not running, stopped, or the OS will not say. 0.0 is a real reading of no CPU time
+    -- Negative if it could not be read at all: not running (or ended and not yet cleaned up), or the OS will not say. 0.0 is a real reading of no CPU time
     -- An application that is not running reads 0.0; negative only when none of its running processes could be read
     function Process_Usage (Before, After : in Sample) return Long_Float;
 

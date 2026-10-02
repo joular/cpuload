@@ -32,7 +32,7 @@ BSD support is planned and will come in a future version.
 
 Every counter in a `Sample` is in **microseconds**, on every system. Both loads run from `0.0` to `1.0` and are a share of the **whole machine**, not of one core: a process using all of one core of an eight core machine reads `0.125`, not `1.0`.
 
-**A negative load means it could not be read at all**: not running, stopped, or not allowed to get the information needed. That is not the same as `0.0`, which means no CPU time used at all.
+**A negative load means it could not be read at all**: not running (a process that has ended but is not yet cleaned up by the system counts as not running), or not allowed to get the information needed. That is not the same as `0.0`, which means no CPU time used at all.
 
 For an application, a process that could not be read is left out of the sum, so the figure is short by what it used. The answer is negative only when some of the application's processes are running and none of them would say anything at all. An application that is not running reads `0.0`. A process of the application that ends between two samples takes all of its time out of the second one, so that stretch reads low, or `0.0`.
 

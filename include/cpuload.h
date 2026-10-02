@@ -77,7 +77,7 @@ void cpuload_take_app_with(const char *app, const cpuload_sample *machine, cpulo
 double cpuload_system_usage(const cpuload_sample *before, const cpuload_sample *after);
 
 /* How much of the whole machine the process or application used, 0.0 to 1.0: all of one core out of eight gives 0.125, not 1.0
- * NEGATIVE if it could not be read at all (not running, stopped, or the system will not say); 0.0 is a real reading of no CPU time
+ * NEGATIVE if it could not be read at all (not running, or ended and not yet cleaned up, or the system will not say); 0.0 is a real reading of no CPU time
  * An application that is not running reads 0.0, and is negative only when none of its running processes could be read
 */
 double cpuload_process_usage(const cpuload_sample *before, const cpuload_sample *after);
