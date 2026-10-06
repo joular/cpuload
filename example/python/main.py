@@ -165,7 +165,7 @@ def main():
     if machine_before.total == 0:
         sys.exit("The machine's counters could not be read at all."
                  " This is what a library built for another system does:"
-                 " build it again with -XPJ_OS for this one (linux, macos or windows).")
+                 " build it again with -XPJ_OS for this one (linux, macos, windows or freebsd).")
 
     try:
         while True:

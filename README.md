@@ -15,15 +15,15 @@ Detailed documentation (including user and reference guides) is available at: [h
 | The whole system | Linux | The `cpu` line of `/proc/stat` |
 | The whole system | macOS | `host_statistics`, macOS' CPU counters |
 | The whole system | Windows | `GetSystemTimes` |
-| The whole system | BSD | `kern.cp_time` through `sysctl` (`kern.cp_time2`, one CPU at a time, on OpenBSD) |
+| The whole system | FreeBSD | `kern.cp_time` through `sysctl` |
 | One process, by its number | Linux | `utime` + `stime` of `/proc/<pid>/stat` |
 | One process, by its number | macOS | `proc_pidinfo`, the user and system time of the process |
 | One process, by its number | Windows | `OpenProcess` + `GetProcessTimes` |
-| One process, by its number | BSD | `kern.proc` (`kern.proc2` on NetBSD) through `sysctl`, the CPU time of the process |
+| One process, by its number | FreeBSD | `kern.proc` through `sysctl`, the CPU time of the process |
 | An application, every process of it | Linux | `/proc` scanned, each process named by `/proc/<pid>/exe` |
 | An application, every process of it | macOS | `proc_listpids`, each process named by `proc_pidpath` |
 | An application, every process of it | Windows | `EnumProcesses` + `QueryFullProcessImageNameW` |
-| An application, every process of it | BSD | `kern.proc` listed, each process named by `kern.proc.pathname` (`kern.proc_args` on NetBSD, its command name on OpenBSD) |
+| An application, every process of it | FreeBSD | `kern.proc` listed, each process named by `kern.proc.pathname` |
 
 Every OS matches the program with the process that actually runs, so `firefox` finds every process of Firefox, its content processes included. On macOS that is the program inside the bundle, so `firefox` finds the application inside `Firefox.app`, and also every program inside `Firefox.app`: for example, its content processes run `plugin-container`, from a helper bundle inside it. On Windows a trailing `.exe` is ignored, so `firefox` also finds `firefox.exe`.
 
@@ -31,7 +31,7 @@ On Linux, a process whose `/proc/<pid>/exe` cannot be read (such as a kernel thr
 
 macOS is supported on Apple Silicon and Intel Macs, with the library built for the chip it runs on. An x86_64 build running under Rosetta on an Apple Silicon Mac reads process times about 40 times too low, so process and application loads come out close to 0%.
 
-FreeBSD, OpenBSD, NetBSD and DragonFly share one build, `bsd`: they all read the same counters through `sysctl`, and differ in a few numbers (counter names, process fields), so the library finds out which one it runs on when it starts. We support 64-bit systems only. FreeBSD, NetBSD and DragonFly tell the program a process runs, so `firefox` finds every process of Firefox as on Linux. OpenBSD never tells it, so there a process is matched by its command name, which the kernel cuts short.
+FreeBSD is supported on 64-bit systems only. A process whose program cannot be named (a kernel process, which runs none, or a process whose program was replaced while it runs) falls back on its command name, which the kernel cuts to 19 characters.
 
 ## :straight_ruler: Reading the numbers
 
@@ -57,7 +57,7 @@ Or directly with GNAT:
 gprbuild -P cpuload.gpr
 ```
 
-The build produces a static library by default, and detects the system automatically: Linux, macOS, Windows and the BSDs are each recognised from the target gprbuild reports, so nothing has to be passed. `-XPJ_OS` still says which system to build for (`linux`, `macos`, `windows` or `bsd`) when it is not the one of the machine building it, and on OpenBSD, which gprbuild has no name for: build there with `-XPJ_OS=bsd`. A library built for another system reads no counters at all and reports 0% for everything.
+The build produces a static library by default, and detects the system automatically: Linux, macOS, Windows and FreeBSD are each recognised from the target gprbuild reports, so nothing has to be passed. `-XPJ_OS` still says which system to build for (`linux`, `macos`, `windows` or `freebsd`) when it is not the one of the machine building it. A library built for another system reads no counters at all and reports 0% for everything.
 
 For other library types (shared, etc.), set `-XCPULOAD_LIBRARY_TYPE`:
 
@@ -65,7 +65,7 @@ For other library types (shared, etc.), set `-XCPULOAD_LIBRARY_TYPE`:
 gprbuild -P cpuload.gpr -XCPULOAD_LIBRARY_TYPE=relocatable
 ```
 
-`relocatable` builds the shared library (`libcpuload.so` / `.dll` / `.dylib`) that carries the C interface and is standalone: it starts itself up when loaded. On Linux, BSD and Windows it is encapsulated as well, carrying the Ada runtime with it, so it is one self-contained file. On macOS it cannot be encapsulated, so the Ada runtime is a separate file: the library records the folder of the runtime of the compiler that built it, and loads it from there with nothing to set (no `DYLD_LIBRARY_PATH`, so it also works under `sudo` and from the system's Python).
+`relocatable` builds the shared library (`libcpuload.so` / `.dll` / `.dylib`) that carries the C interface and is standalone: it starts itself up when loaded. On Linux, FreeBSD and Windows it is encapsulated as well, carrying the Ada runtime with it, so it is one self-contained file. On macOS it cannot be encapsulated, so the Ada runtime is a separate file: the library records the folder of the runtime of the compiler that built it, and loads it from there with nothing to set (no `DYLD_LIBRARY_PATH`, so it also works under `sudo` and from the system's Python).
 
 ## Using from Ada
 
@@ -204,7 +204,7 @@ Each OS has its own body of [src/cpu_load-platform.ads](src/cpu_load-platform.ad
 - `Runs`: whether a process runs the program an application is named by
 - `For_Each_Process`: every process running
 
-One body per OS lives in [src/linux](src/linux/cpu_load-platform.adb), [src/macos](src/macos/cpu_load-platform.adb) and [src/windows](src/windows/cpu_load-platform.adb), one for all the BSDs in [src/bsd](src/bsd/cpu_load-platform.adb), and [cpuload.gpr](cpuload.gpr) picks the folder for the OS being built from the `PJ_OS` symbol.
+One body per OS lives in [src/linux](src/linux/cpu_load-platform.adb), [src/macos](src/macos/cpu_load-platform.adb), [src/windows](src/windows/cpu_load-platform.adb) and [src/freebsd](src/freebsd/cpu_load-platform.adb), and [cpuload.gpr](cpuload.gpr) picks the folder for the OS being built from the `PJ_OS` symbol.
 
 To support a new OS, write a body of `CPU_Load.Platform` for it and add its folder there.
 

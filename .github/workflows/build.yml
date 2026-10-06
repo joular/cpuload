@@ -58,9 +58,9 @@ jobs:
         run: alr exec -- make -C example/python
 
       # Own object folder, so the objects of the library built above are not replaced
-      - name: Compile-check the BSD branch (Linux)
+      - name: Compile-check the FreeBSD branch (Linux)
         if: runner.os == 'Linux'
-        run: alr exec -- gprbuild -P cpuload.gpr -XPJ_OS=bsd -f -c --subdirs=check-bsd
+        run: alr exec -- gprbuild -P cpuload.gpr -XPJ_OS=freebsd -f -c --subdirs=check-freebsd
 
       # The examples take a number of readings after the application name ("" follows none) and stop
       - name: Run the examples for a few readings

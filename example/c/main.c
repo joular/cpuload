@@ -95,7 +95,7 @@ int main(int argc, char **argv)
     if (machine_before.total == 0) {
         printf("The machine's counters could not be read at all."
                " This is what a library built for another system does:"
-               " build it again with -XPJ_OS for this one (linux, macos or windows).\n");
+               " build it again with -XPJ_OS for this one (linux, macos, windows or freebsd).\n");
         return 1;
     }
 
