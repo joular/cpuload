@@ -10,7 +10,7 @@
 --
 
 -- CPU Load reports the CPU usage of the system, of one process, or of an application (all of its processes running when each sample is taken)
--- Works on Linux, macOS and Windows
+-- Works on Linux, macOS, Windows and BSDs
 -- It keeps no state. Linked statically, it can be called from any number of Ada tasks. The shared library must be called from one thread or task at a time (see include/cpuload.h)
 -- Take a sample, wait, take another, compare:
 --     Before := Take ("firefox");
@@ -48,7 +48,7 @@ package CPU_Load is
 
     -- Sample the system and every process of an application
     -- App is the program's name without its folders, matched exactly, case-insensitive; "" samples the system alone
-    -- Linux and macOS match the program the process runs: "firefox" matches every process of Firefox
+    -- Linux, macOS and BSDs match the program the process runs: "firefox" matches every process of Firefox (OpenBSD matches the command name, as it never tells the program)
     -- macOS also matches every program inside Firefox.app, as its content processes run from a helper bundle in it
     -- Windows also ignores a trailing ".exe"
     -- A process that ends between two samples takes its time out of the second one, so that stretch reads low, or 0.0

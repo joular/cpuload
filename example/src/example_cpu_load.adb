@@ -11,7 +11,7 @@
 
 --  Prints the CPU load of the machine, of this very program, and of an application named on the command line, every second, until stopped with Ctrl+C
 --
---  Build and run it with (the system is detected on its own, -XPJ_OS overrides it: linux, macos or windows):
+--  Build and run it with (the system is detected on its own, -XPJ_OS overrides it: linux, macos, windows or bsd):
 --    gprbuild -P example/example.gpr -p
 --    ./example/example_cpu_load firefox
 --
@@ -127,6 +127,8 @@ begin
         Put_Line ("Was this built for another system? Rebuild with -XPJ_OS=macos");
 #elsif PJ_WINDOWS then
         Put_Line ("Was this built for another system? Rebuild with -XPJ_OS=windows");
+#elsif PJ_BSD then
+        Put_Line ("Only FreeBSD, OpenBSD, NetBSD and DragonFly are known. Was this built for another system? Rebuild with -XPJ_OS=bsd");
 #else
         Put_Line ("Is /proc mounted? Otherwise rebuild with -XPJ_OS=linux");
 #end if;

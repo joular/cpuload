@@ -25,7 +25,7 @@
  *   cpuload_take_app("firefox", &after);
  *   printf("%.2f%%\n", 100.0 * cpuload_process_usage(&before, &after));
  *
- * Sample about a second apart: Linux counts a process in 10 ms units and Windows in ~15 ms, too coarse for shorter waits. macOS counts in nanoseconds and reads well below a second
+ * Sample about a second apart: Linux counts a process in 10 ms units, Windows in ~15 ms, and the BSDs count the machine in ticks of 8 to 10 ms, too coarse for shorter waits. macOS counts in nanoseconds and reads well below a second
  */
 
 #ifndef CPULOAD_H

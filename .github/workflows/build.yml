@@ -57,6 +57,11 @@ jobs:
       - name: Build the library the Python example loads
         run: alr exec -- make -C example/python
 
+      # Own object folder, so the objects of the library built above are not replaced
+      - name: Compile-check the BSD branch (Linux)
+        if: runner.os == 'Linux'
+        run: alr exec -- gprbuild -P cpuload.gpr -XPJ_OS=bsd -f -c --subdirs=check-bsd
+
       # The examples take a number of readings after the application name ("" follows none) and stop
       - name: Run the examples for a few readings
         shell: bash

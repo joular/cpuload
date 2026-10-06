@@ -9,7 +9,7 @@
 --  Author : Adel Noureddine
 --
 
--- The OS-specific part of CPU Load: one body per OS in src/linux, src/macos and src/windows, picked by PJ_OS in cpuload.gpr
+-- The OS-specific part of CPU Load: one body per OS in src/linux, src/macos, src/windows and src/bsd, picked by PJ_OS in cpuload.gpr
 -- To support a new OS, write a body of this package for it, and nothing else
 -- All times are in microseconds, and no function here raises an exception
 private package CPU_Load.Platform is

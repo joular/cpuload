@@ -6,6 +6,8 @@ CPU Load is a library that reports CPU load of the system, of a specific process
 
 The library is written in Ada, and also provides a [C interface](include/cpuload.h) so it can be used from any language with a C FFI (C, C++, Java, Python, Rust, etc.).
 
+Detailed documentation (including user and reference guides) is available at: [https://joular.github.io/cpuload/](https://joular.github.io/cpuload/).
+
 ## :satellite: Supported platforms
 
 | What is measured | OS | Method |
@@ -13,12 +15,15 @@ The library is written in Ada, and also provides a [C interface](include/cpuload
 | The whole system | Linux | The `cpu` line of `/proc/stat` |
 | The whole system | macOS | `host_statistics`, macOS' CPU counters |
 | The whole system | Windows | `GetSystemTimes` |
+| The whole system | BSD | `kern.cp_time` through `sysctl` (`kern.cp_time2`, one CPU at a time, on OpenBSD) |
 | One process, by its number | Linux | `utime` + `stime` of `/proc/<pid>/stat` |
 | One process, by its number | macOS | `proc_pidinfo`, the user and system time of the process |
 | One process, by its number | Windows | `OpenProcess` + `GetProcessTimes` |
+| One process, by its number | BSD | `kern.proc` (`kern.proc2` on NetBSD) through `sysctl`, the CPU time of the process |
 | An application, every process of it | Linux | `/proc` scanned, each process named by `/proc/<pid>/exe` |
 | An application, every process of it | macOS | `proc_listpids`, each process named by `proc_pidpath` |
 | An application, every process of it | Windows | `EnumProcesses` + `QueryFullProcessImageNameW` |
+| An application, every process of it | BSD | `kern.proc` listed, each process named by `kern.proc.pathname` (`kern.proc_args` on NetBSD, its command name on OpenBSD) |
 
 Every OS matches the program with the process that actually runs, so `firefox` finds every process of Firefox, its content processes included. On macOS that is the program inside the bundle, so `firefox` finds the application inside `Firefox.app`, and also every program inside `Firefox.app`: for example, its content processes run `plugin-container`, from a helper bundle inside it. On Windows a trailing `.exe` is ignored, so `firefox` also finds `firefox.exe`.
 
@@ -26,7 +31,7 @@ On Linux, a process whose `/proc/<pid>/exe` cannot be read (such as a kernel thr
 
 macOS is supported on Apple Silicon and Intel Macs, with the library built for the chip it runs on. An x86_64 build running under Rosetta on an Apple Silicon Mac reads process times about 40 times too low, so process and application loads come out close to 0%.
 
-BSD support is planned and will come in a future version.
+FreeBSD, OpenBSD, NetBSD and DragonFly share one build, `bsd`: they all read the same counters through `sysctl`, and differ in a few numbers (counter names, process fields), so the library finds out which one it runs on when it starts. We support 64-bit systems only. FreeBSD, NetBSD and DragonFly tell the program a process runs, so `firefox` finds every process of Firefox as on Linux. OpenBSD never tells it, so there a process is matched by its command name, which the kernel cuts short.
 
 ## :straight_ruler: Reading the numbers
 
@@ -36,7 +41,7 @@ Every counter in a `Sample` is in **microseconds**, on every system. Both loads 
 
 For an application, a process that could not be read is left out of the sum, so the figure is short by what it used. The answer is negative only when some of the application's processes are running and none of them would say anything at all. An application that is not running reads `0.0`. A process of the application that ends between two samples takes all of its time out of the second one, so that stretch reads low, or `0.0`.
 
-The library keeps has state. Linked statically into an Ada program, it can be called from any number of tasks. The shared library must be called from one thread or task at a time, whatever the language: it carries its own Ada runtime without tasking, which has a single working stack for the whole process. A sample is a plain record either way, so it can be taken in one thread and compared in another.
+The library keeps no state. Linked statically into an Ada program, it can be called from any number of tasks. The shared library must be called from one thread or task at a time, whatever the language: it carries its own Ada runtime without tasking, which has a single working stack for the whole process. A sample is a plain record either way, so it can be taken in one thread and compared in another.
 
 ## Building
 
@@ -52,7 +57,7 @@ Or directly with GNAT:
 gprbuild -P cpuload.gpr
 ```
 
-The build produces a static library by default, and detects the system automatically: Linux, macOS and Windows are each recognised from the target gprbuild reports, so nothing has to be passed. `-XPJ_OS` still says which system to build for (`linux`, `macos` or `windows`) when it is not the one of the machine building it. A library built for another system reads no counters at all and reports 0% for everything.
+The build produces a static library by default, and detects the system automatically: Linux, macOS, Windows and the BSDs are each recognised from the target gprbuild reports, so nothing has to be passed. `-XPJ_OS` still says which system to build for (`linux`, `macos`, `windows` or `bsd`) when it is not the one of the machine building it, and on OpenBSD, which gprbuild has no name for: build there with `-XPJ_OS=bsd`. A library built for another system reads no counters at all and reports 0% for everything.
 
 For other library types (shared, etc.), set `-XCPULOAD_LIBRARY_TYPE`:
 
@@ -60,7 +65,7 @@ For other library types (shared, etc.), set `-XCPULOAD_LIBRARY_TYPE`:
 gprbuild -P cpuload.gpr -XCPULOAD_LIBRARY_TYPE=relocatable
 ```
 
-`relocatable` builds the shared library (`libcpuload.so` / `.dll` / `.dylib`) that carries the C interface and is standalone: it starts itself up when loaded. On Linux and Windows it is encapsulated as well, carrying the Ada runtime with it, so it is one self-contained file. On macOS it cannot be encapsulated, so the Ada runtime is a separate file: the library records the folder of the runtime of the compiler that built it, and loads it from there with nothing to set (no `DYLD_LIBRARY_PATH`, so it also works under `sudo` and from the system's Python).
+`relocatable` builds the shared library (`libcpuload.so` / `.dll` / `.dylib`) that carries the C interface and is standalone: it starts itself up when loaded. On Linux, BSD and Windows it is encapsulated as well, carrying the Ada runtime with it, so it is one self-contained file. On macOS it cannot be encapsulated, so the Ada runtime is a separate file: the library records the folder of the runtime of the compiler that built it, and loads it from there with nothing to set (no `DYLD_LIBRARY_PATH`, so it also works under `sudo` and from the system's Python).
 
 ## Using from Ada
 
@@ -106,7 +111,7 @@ gprbuild -P example/example.gpr -p
 
 A number after the name stops it after that many readings (`""` follows no application), which is what the CI runs: `./example/example_cpu_load "" 3`.
 
-The counters need no particular rights on any of the three systems. When the machine reads nothing at all, the example says what to look into on the system it was built for.
+The counters need no particular rights on any system. When the machine reads nothing at all, the example says what to look into on the system it was built for.
 
 With Alire, add the library to your project with `alr with cpuload`.
 
@@ -199,7 +204,7 @@ Each OS has its own body of [src/cpu_load-platform.ads](src/cpu_load-platform.ad
 - `Runs`: whether a process runs the program an application is named by
 - `For_Each_Process`: every process running
 
-One body per OS lives in [src/linux](src/linux/cpu_load-platform.adb), [src/macos](src/macos/cpu_load-platform.adb) and [src/windows](src/windows/cpu_load-platform.adb), and [cpuload.gpr](cpuload.gpr) picks the folder for the OS being built from the `PJ_OS` symbol.
+One body per OS lives in [src/linux](src/linux/cpu_load-platform.adb), [src/macos](src/macos/cpu_load-platform.adb) and [src/windows](src/windows/cpu_load-platform.adb), one for all the BSDs in [src/bsd](src/bsd/cpu_load-platform.adb), and [cpuload.gpr](cpuload.gpr) picks the folder for the OS being built from the `PJ_OS` symbol.
 
 To support a new OS, write a body of `CPU_Load.Platform` for it and add its folder there.
 
