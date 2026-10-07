@@ -57,6 +57,8 @@ Or directly with GNAT:
 gprbuild -P cpuload.gpr
 ```
 
+On FreeBSD, build with GNAT 15 or newer: `pkg install gprbuild gnat15`, then add `/usr/local/gnat15/bin` to `PATH`. GNAT 12, which `pkg install gprbuild` uses, ignores the pragma that keeps the shared library away from the signal handlers of the program loading it. Alire takes the GNAT in `PATH` there too, and refuses an older one.
+
 The build produces a static library by default, and detects the system automatically: Linux, macOS, Windows and FreeBSD are each recognised from the target gprbuild reports, so nothing has to be passed. `-XPJ_OS` still says which system to build for (`linux`, `macos`, `windows` or `freebsd`) when it is not the one of the machine building it. A library built for another system reads no counters at all and reports 0% for everything.
 
 For other library types (shared, etc.), set `-XCPULOAD_LIBRARY_TYPE`:
@@ -147,6 +149,8 @@ A full example program is in [example/c/main.c](example/c/main.c). Like the Ada 
 ```bash
 make -C example/c run APP=firefox
 ```
+
+On FreeBSD, the Makefile needs GNU make: run `gmake` instead of `make`.
 
 To build it by hand instead, from the root of the repository, first compile the library:
 

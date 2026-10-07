@@ -1,4 +1,5 @@
-# Builds the C example of CPU Load, on Linux, macOS and Windows
+# Builds the C example of CPU Load, on Linux, macOS, Windows and FreeBSD
+# This is GNU make: on FreeBSD, run gmake instead of make
 #
 #   make          builds the shared library and the example
 #   make run      builds it, then runs it (stop it with Ctrl+C)
@@ -34,7 +35,7 @@ else
 
     EXE = example_c
 
-    # Linux and macOS record the folder of the library inside the program, so it is found when running
+    # Linux, macOS and FreeBSD record the folder of the library inside the program, so it is found when running
     LDFLAGS += -Wl,-rpath,$(abspath $(LIB_DIR))
 
     COPY_LIBRARY = true

@@ -36,3 +36,8 @@ windows = true
 macos = true
 freebsd = true
 '...' = false
+
+# On FreeBSD, Alire builds with the GNAT in PATH: GNAT 12, the system's default, ignores pragma Interrupts_System_By_Default
+[[depends-on]]
+[depends-on.'case(os)'.freebsd]
+gnat = ">=15"

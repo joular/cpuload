@@ -57,14 +57,32 @@ jobs:
       - name: Build the library the Python example loads
         run: alr exec -- make -C example/python
 
-      # Own object folder, so the objects of the library built above are not replaced
-      - name: Compile-check the FreeBSD branch (Linux)
-        if: runner.os == 'Linux'
-        run: alr exec -- gprbuild -P cpuload.gpr -XPJ_OS=freebsd -f -c --subdirs=check-freebsd
-
       # The examples take a number of readings after the application name ("" follows none) and stop
       - name: Run the examples for a few readings
         shell: bash
         run: |
           ./example/example_cpu_load "" 3
           ./example/c/example_c "" 3
+
+  # FreeBSD, in a virtual machine as GitHub has no FreeBSD runners
+  # GNAT 15 at least: GNAT 12, which gprbuild uses, ignores pragma Interrupts_System_By_Default
+  # Nothing tells the build it is on FreeBSD: it finds out on its own, as it does for anyone building there
+  freebsd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # gmake, as the Makefile of the C example is written for GNU make
+      - name: Build and run the examples in FreeBSD
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "14"
+          prepare: pkg install -y gprbuild gnat15 gmake
+          run: |
+            export PATH=/usr/local/gnat15/bin:$PATH
+            gprbuild -P cpuload.gpr -p
+            gprbuild -P cpuload.gpr -XCPULOAD_LIBRARY_TYPE=relocatable -p
+            gprbuild -P example/example.gpr -p
+            gmake -C example/c
+            ./example/example_cpu_load "" 3
+            ./example/c/example_c "" 3
