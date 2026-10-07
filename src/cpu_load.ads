@@ -70,6 +70,6 @@ package CPU_Load is
     function Process_Usage (Before, After : in Sample) return Long_Float;
 
     -- Keep it the same as the version in alire.toml
-    function Version return String is ("0.0.4");
+    function Version return String is ("0.0.5");
 
 end CPU_Load;
