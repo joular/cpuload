@@ -2,6 +2,8 @@
 
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPLv3-blue)](https://www.gnu.org/licenses/lgpl-3.0) [![Ada](https://img.shields.io/badge/Made%20with-Ada-blue)](https://www.adaic.org)
 
+![CPU Load Logo](joular-cpuload.png)
+
 CPU Load is a library that reports CPU load of the system, of a specific process by its ID, or a specific application by its name (meaning every one of its processes running when a sample is taken).
 
 The library is written in Ada, and also provides a [C interface](include/cpuload.h) so it can be used from any language with a C FFI (C, C++, Java, Python, Rust, etc.).
