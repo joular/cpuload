@@ -29,7 +29,7 @@ Detailed documentation (including user and reference guides) is available at: [h
 
 Every OS matches the program with the process that actually runs, so `firefox` finds every process of Firefox, its content processes included. On macOS that is the program inside the bundle, so `firefox` finds the application inside `Firefox.app`, and also every program inside `Firefox.app`: for example, its content processes run `plugin-container`, from a helper bundle inside it. On Windows a trailing `.exe` is ignored, so `firefox` also finds `firefox.exe`.
 
-On Linux, a process whose `/proc/<pid>/exe` cannot be read (such as a kernel thread, which runs no program directly, or another user's process) falls back on `/proc/<pid>/comm`. This file have the given name of the process (with a max size of 15 character).
+On Linux, a process whose `/proc/<pid>/exe` cannot be read (such as a kernel thread, which runs no program directly, or another user's process) falls back on `/proc/<pid>/comm`. This file holds the name the process gave itself, 15 characters at most.
 
 macOS is supported on Apple Silicon and Intel Macs, with the library built for the chip it runs on. An x86_64 build running under Rosetta on an Apple Silicon Mac reads process times about 40 times too low, so process and application loads come out close to 0%.
 
@@ -96,7 +96,7 @@ begin
 end Measure;
 ```
 
-The whole interface is `Sample`, the three `Take` functions (the system alone, one `Process_ID`, or an application by name).
+The whole interface is `Sample`, the five `Take` functions (the system alone, one `Process_ID` or an application by name, the last two also against a machine sample already taken), and the two usage functions `System_Usage` and `Process_Usage`.
 
 To follow several things at once, read the machine once and measure each of them against that one reading. Each is then measured over exactly the same period of time, and the machine's counters are read once instead of once per thing:
 

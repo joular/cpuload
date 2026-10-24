@@ -117,11 +117,22 @@ package body CPU_Load.Platform is
 
     --------------------------------------------------
 
+    -- The list For_Each_Process goes through, kept between samples so it is not allocated every time
+    -- Current is the item Action is being called for, so Runs and Used_By_PID find their process there instead of asking the kernel again
+    Listing : Process_List_Access := null;
+    Listed : Natural := 0;
+    Current : Natural := 0;
+
     -- The kinfo_proc of PID; False if there is no such process
     -- The answer must be about PID: above the last process number, FreeBSD takes the number for a thread, and answers with its process
     function Read_Process (PID : in Process_ID; Data : out Process) return Boolean is
         Length : Size := Entry_Size;
     begin
+        if Current in 1 .. Listed and then Listing (Current).PID = Int (PID) then
+            Data := Listing (Current);
+            return True;
+        end if;
+
         return Ask (KERN_PROC_PID & Int (PID), Data'Address, Length)
                and then Length = Entry_Size
                and then Data.PID = Int (PID);
@@ -201,33 +212,40 @@ package body CPU_Load.Platform is
     function For_Each_Process (Action : not null access procedure (PID : in Process_ID))
         return Boolean is
         Length : Size := 0;
-        List : Process_List_Access;
     begin
         -- With no buffer, sysctl answers the room needed; processes may start meanwhile, so take twice that
         if not Ask (KERN_PROC_PROC, System.Null_Address, Length) then
             return False;
         end if;
 
-        List := new Process_List (1 .. 2 * Natural (Length) / Entry_Size);
-        Length := List'Length * Entry_Size;
+        if Listing = null or else Listing'Length * Entry_Size < 2 * Natural (Length) then
+            Free (Listing);
+            Listing := new Process_List (1 .. 2 * Natural (Length) / Entry_Size);
+        end if;
 
-        if not Ask (KERN_PROC_PROC, List.all'Address, Length) then
-            Free (List);
+        Length := Listing'Length * Entry_Size;
+
+        if not Ask (KERN_PROC_PROC, Listing.all'Address, Length) then
+            Listed := 0;
             return False;
         end if;
 
+        Listed := Natural (Length) / Entry_Size;
+
         -- One entry per process; PID 0 is the kernel
-        for Item of List (1 .. Natural (Length) / Entry_Size) loop
-            if Item.PID > 0 then
-                Action (Process_ID (Item.PID));
+        for I in 1 .. Listed loop
+            Current := I;
+
+            if Listing (I).PID > 0 then
+                Action (Process_ID (Listing (I).PID));
             end if;
         end loop;
 
-        Free (List);
+        Current := 0;
         return True;
     exception
         when others =>
-            Free (List);
+            Current := 0;
             return False;
     end For_Each_Process;
 

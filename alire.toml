@@ -13,9 +13,8 @@ maintainers-logins = ["adelnoureddine"]
 
 tags = ["cpu", "process", "monitoring", "linux", "windows", "macos", "freebsd", "application", "usage", "load"]
 
-
 licenses = "LGPL-3.0-only"
-website = "https://www.noureddine.org/research/joular"
+website = "https://www.noureddine.org/research/joular/cpuload"
 
 [gpr-externals]
 PJ_OS = ["linux", "windows", "macos", "freebsd"]

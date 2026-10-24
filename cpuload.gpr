@@ -17,10 +17,10 @@ library project CpuLoad is
         when "x86_64-freebsd" | "aarch64-freebsd"
             => Default_OS := "freebsd";
         when others =>
-            -- A name not listed above: Windows says so in its environment, anything else is taken as Linux
+            -- A name not listed above: Windows says so in its environment, anything else stops the build, so pass -XPJ_OS
             case Host_OS is
                 when "Windows_NT" => Default_OS := "windows";
-                when others => null;
+                when others => Default_OS := "";
             end case;
     end case;
 
