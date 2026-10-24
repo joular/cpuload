@@ -10,7 +10,8 @@ jobs:
       fail-fast: false
       matrix:
         # macos-15-intel: Intel Macs (macos-26-intel is the last Intel image, macOS 26 being the last macOS for Intel Macs)
-        os: [ubuntu-latest, windows-latest, macos-latest, macos-15-intel]
+        # macos-15 rather than macos-latest: the GNAT of Alire links with Apple's ld-classic, which rejects the SDK of the macOS 26 image
+        os: [ubuntu-latest, windows-latest, macos-15, macos-15-intel]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
