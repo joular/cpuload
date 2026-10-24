@@ -1,6 +1,6 @@
 name = "cpuload"
 description = "Library to monitor processes, applications and system CPU usage"
-version = "0.0.5"
+version = "0.0.6"
 
 long-description = """
 CPU Load reports system, processes and applications' (every process of it) CPU load.
