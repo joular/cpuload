@@ -26,6 +26,7 @@
  * -rpath is where the program looks for the library when it runs
  */
 
+#include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -62,14 +63,29 @@ static void print_load(const char *name, double load)
         printf("%s %.2f%%", name, 100.0 * load);
 }
 
+/* Reads how many readings to take before stopping (zero runs until Ctrl+C) into *wanted
+ * Returns 0 when text is not a whole number of zero or more, 1 otherwise */
+static int wanted_readings(const char *text, long *wanted)
+{
+    char *end = NULL;
+
+    errno = 0;
+    *wanted = strtol(text, &end, 10);
+
+    if (end == text || *end != '\0' || errno == ERANGE || *wanted < 0)
+        return 0;
+
+    return 1;
+}
+
 int main(int argc, char **argv)
 {
     /* No name, or an empty one: follow no application */
     const char *app = (argc > 1 && argv[1][0] != '\0') ? argv[1] : NULL;
 
     /* How many readings to take before stopping, or zero to run until Ctrl+C */
-    int wanted = (argc > 2) ? atoi(argv[2]) : 0;
-    int taken = 0;
+    long wanted = 0;
+    long taken = 0;
 
     unsigned int ours = current_pid();
 
@@ -77,6 +93,11 @@ int main(int argc, char **argv)
     cpuload_sample machine_before, machine_after;
     cpuload_sample mine_before, mine_after;
     cpuload_sample app_before, app_after;
+
+    if (argc > 2 && !wanted_readings(argv[2], &wanted)) {
+        fprintf(stderr, "usage: %s [application] [number of readings]\n", argv[0]);
+        return 1;
+    }
 
     printf("CPU Load %s\n", cpuload_version());
 

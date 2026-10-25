@@ -90,8 +90,7 @@ procedure Example_CPU_Load is
         (if Argument_Count >= 1 then Argument (1) else "");
 
     --  How many readings to take before stopping, or zero to run until Ctrl+C
-    Wanted_Readings : constant Natural :=
-        (if Argument_Count >= 2 then Natural'Value (Argument (2)) else 0);
+    Wanted_Readings : Natural := 0;
     Taken : Natural := 0;
 
     --  Read the machine once per loop so all three loads cover the same interval
@@ -100,6 +99,17 @@ procedure Example_CPU_Load is
     App_Before, App_After : Sample;
 
 begin
+    if Argument_Count >= 2 then
+        begin
+            Wanted_Readings := Natural'Value (Argument (2));
+        exception
+            when Constraint_Error =>
+                Put_Line (Standard_Error, "usage: " & Command_Name & " [application] [number of readings]");
+                Set_Exit_Status (Failure);
+                return;
+        end;
+    end if;
+
     Put_Line (Ready_Colour & "CPU Load" & Reset);
 
     if App = "" then
