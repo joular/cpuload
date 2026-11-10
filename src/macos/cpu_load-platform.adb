@@ -13,6 +13,7 @@ with Interfaces.C;
 with System;
 with System.Multiprocessors;
 with Ada.Characters.Handling;
+with Ada.Strings.Fixed;
 with GNAT.Directory_Operations;
 
 package body CPU_Load.Platform is
@@ -147,8 +148,8 @@ package body CPU_Load.Platform is
 
     --------------------------------------------------
 
-    -- Program name without its folders, or "" if unknown
-    function Program_Of (PID : in Process_ID) return String is
+    -- Full path of the program, or "" if unknown
+    function Path_Of (PID : in Process_ID) return String is
         -- proc_pidpath refuses a smaller buffer
         Path : String (1 .. 4_096);
         Length : Interfaces.C.int;
@@ -159,8 +160,8 @@ package body CPU_Load.Platform is
             return "";
         end if;
 
-        return GNAT.Directory_Operations.Base_Name (Path (1 .. Natural (Length)));
-    end Program_Of;
+        return Path (1 .. Natural (Length));
+    end Path_Of;
 
     --------------------------------------------------
 
@@ -207,10 +208,17 @@ package body CPU_Load.Platform is
 
     --------------------------------------------------
 
+    -- The program itself, or any program inside App.app: Firefox runs its content processes from a helper bundle inside it
     function Runs (PID : in Process_ID; App : in String) return Boolean is
         use Ada.Characters.Handling;
     begin
-        return To_Lower (Program_Of (PID)) = To_Lower (App);
+        declare
+            Path : constant String := To_Lower (Path_Of (PID));
+            Name : constant String := To_Lower (App);
+        begin
+            return GNAT.Directory_Operations.Base_Name (Path) = Name
+                   or else Ada.Strings.Fixed.Index (Path, "/" & Name & ".app/") > 0;
+        end;
     exception
         when others =>
             return False;

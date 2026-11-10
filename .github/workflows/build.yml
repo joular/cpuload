@@ -4,18 +4,22 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
         # macos-15-intel: Intel Macs (macos-26-intel is the last Intel image, macOS 26 being the last macOS for Intel Macs)
-        os: [ubuntu-latest, windows-latest, macos-latest, macos-15-intel]
+        # macos-15 rather than macos-latest: the GNAT of Alire links with Apple's ld-classic, which rejects the SDK of the macOS 26 image
+        os: [ubuntu-latest, windows-latest, macos-15, macos-15-intel]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
 
-      # Use Alire for the GNAT toolchain, and picking PJ_OS for the system it runs on
+      # Use Alire for the GNAT toolchain; cpuload.gpr picks the OS from the target
       - uses: alire-project/setup-alire@v6
 
       # cpuload_version() is a public C API, check for version mismatch with alire.toml
@@ -63,3 +67,26 @@ jobs:
         run: |
           ./example/example_cpu_load "" 3
           ./example/c/example_c "" 3
+
+  # FreeBSD, in a virtual machine as GitHub has no FreeBSD runners
+  # GNAT 15 at least: GNAT 12, which gprbuild uses, ignores pragma Interrupts_System_By_Default
+  # Nothing tells the build it is on FreeBSD: it finds out on its own, as it does for anyone building there
+  freebsd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # gmake, as the Makefile of the C example is written for GNU make
+      - name: Build and run the examples in FreeBSD
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "14"
+          prepare: pkg install -y gprbuild gnat15 gmake
+          run: |
+            export PATH=/usr/local/gnat15/bin:$PATH
+            gprbuild -P cpuload.gpr -p
+            gprbuild -P cpuload.gpr -XCPULOAD_LIBRARY_TYPE=relocatable -p
+            gprbuild -P example/example.gpr -p
+            gmake -C example/c
+            ./example/example_cpu_load "" 3
+            ./example/c/example_c "" 3

@@ -113,6 +113,16 @@ package body CPU_Load.Platform is
 
     --------------------------------------------------
 
+    -- Whether /proc/PID/stat says the process has ended: a zombie (Z) or dead (X, x), its times frozen
+    -- The state is the field after the name in brackets, which may hold spaces or ")", so it is found from the last ")"
+    function Has_Ended (Stat : in String) return Boolean is
+        Name_End : constant Natural := Index (Stat, ")", Going => Backward);
+    begin
+        return Name_End > 0 and then Stat (Name_End + 2) in 'Z' | 'X' | 'x';
+    end Has_Ended;
+
+    --------------------------------------------------
+
     -- Base name of the program a process runs, from /proc/PID/exe
     -- Falls back to comm (15 chars max, name chosen by the process) for kernel threads and other users' processes
     function Program_Of (PID : in Process_ID) return String is
@@ -149,6 +159,7 @@ package body CPU_Load.Platform is
         -- First line of /proc/stat, in ticks over all cores:
         -- cpu  user nice system idle iowait irq softirq steal guest guest_nice
         -- guest and guest_nice are already inside user and nice
+        -- steal is the time a virtual machine waited for its host: no work of this machine, so idle
         Line : constant String := First_Line ("/proc/stat");
         Busy : Integer_64;
         Idle : Integer_64;
@@ -161,11 +172,11 @@ package body CPU_Load.Platform is
               + Field (Line, 3)     -- nice
               + Field (Line, 4)     -- system
               + Field (Line, 7)     -- irq
-              + Field (Line, 8)     -- softirq
-              + Field (Line, 9);    -- steal
+              + Field (Line, 8);    -- softirq
 
         Idle := Field (Line, 5)     -- idle
-              + Field (Line, 6);    -- iowait
+              + Field (Line, 6)     -- iowait
+              + Field (Line, 9);    -- steal
 
         return (Busy => Busy * Microseconds_Per_Tick,
                 Total => (Busy + Idle) * Microseconds_Per_Tick,
@@ -185,7 +196,7 @@ package body CPU_Load.Platform is
         Name_End : constant Natural := Index (Line, ")", Going => Backward);
         After_Name : String renames Line (Name_End + 1 .. Line'Last);
     begin
-        if Name_End = 0 then
+        if Name_End = 0 or else Has_Ended (Line) then
             return Not_Read;
         end if;
 
@@ -201,7 +212,9 @@ package body CPU_Load.Platform is
     function Runs (PID : in Process_ID; App : in String) return Boolean is
         use Ada.Characters.Handling;
     begin
-        return To_Lower (Program_Of (PID)) = To_Lower (App);
+        -- A process that has ended keeps its name, so the state settles it (read for the few that match)
+        return To_Lower (Program_Of (PID)) = To_Lower (App)
+               and then not Has_Ended (Read_File (Proc_File (PID, "stat")));
     exception
         when others =>
             return False;

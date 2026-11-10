@@ -2,41 +2,48 @@
 
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPLv3-blue)](https://www.gnu.org/licenses/lgpl-3.0) [![Ada](https://img.shields.io/badge/Made%20with-Ada-blue)](https://www.adaic.org)
 
+![CPU Load Logo](joular-cpuload.png)
+
 CPU Load is a library that reports CPU load of the system, of a specific process by its ID, or a specific application by its name (meaning every one of its processes running when a sample is taken).
 
 The library is written in Ada, and also provides a [C interface](include/cpuload.h) so it can be used from any language with a C FFI (C, C++, Java, Python, Rust, etc.).
+
+Detailed documentation (including user and reference guides) is available at: [https://joular.github.io/cpuload/](https://joular.github.io/cpuload/).
 
 ## :satellite: Supported platforms
 
 | What is measured | OS | Method |
 |---|---|---|
-| The whole system | Linux | The `cpu` line of `/proc/stat` |
+| The whole system | Linux | The `cpu` line of `/proc/stat`; waiting for I/O, and time stolen by the host of a virtual machine, count as idle |
 | The whole system | macOS | `host_statistics`, macOS' CPU counters |
 | The whole system | Windows | `GetSystemTimes` |
+| The whole system | FreeBSD | `kern.cp_time` through `sysctl` |
 | One process, by its number | Linux | `utime` + `stime` of `/proc/<pid>/stat` |
 | One process, by its number | macOS | `proc_pidinfo`, the user and system time of the process |
 | One process, by its number | Windows | `OpenProcess` + `GetProcessTimes` |
+| One process, by its number | FreeBSD | `kern.proc` through `sysctl`, the CPU time of the process |
 | An application, every process of it | Linux | `/proc` scanned, each process named by `/proc/<pid>/exe` |
 | An application, every process of it | macOS | `proc_listpids`, each process named by `proc_pidpath` |
 | An application, every process of it | Windows | `EnumProcesses` + `QueryFullProcessImageNameW` |
+| An application, every process of it | FreeBSD | `kern.proc` listed, each process named by `kern.proc.pathname` |
 
-Every OS matches the program with the process that actually runs, so `firefox` finds every process of Firefox, its content processes included. On macOS that is the program inside the bundle, so `firefox` finds the application inside `Firefox.app`. On Windows a trailing `.exe` is ignored, so `firefox` also finds `firefox.exe`.
+Every OS matches the program with the process that actually runs, so `firefox` finds every process of Firefox, its content processes included. On macOS that is the program inside the bundle, so `firefox` finds the application inside `Firefox.app`, and also every program inside `Firefox.app`: for example, its content processes run `plugin-container`, from a helper bundle inside it. On Windows a trailing `.exe` is ignored, so `firefox` also finds `firefox.exe`. The name is the one of the program file itself, after any link is followed: where `python3` is a link to `python3.12`, the application to ask for is `python3.12`.
 
-On Linux, a process whose `/proc/<pid>/exe` cannot be read (such as a kernel thread, which runs no program directly, or another user's process) falls back on `/proc/<pid>/comm`. This file have the given name of the process (with a max size of 15 character).
+On Linux, a process whose `/proc/<pid>/exe` cannot be read (such as a kernel thread, which runs no program directly, or another user's process) falls back on `/proc/<pid>/comm`. This file holds the name the process gave itself, 15 characters at most.
 
 macOS is supported on Apple Silicon and Intel Macs, with the library built for the chip it runs on. An x86_64 build running under Rosetta on an Apple Silicon Mac reads process times about 40 times too low, so process and application loads come out close to 0%.
 
-BSD support is planned and will come in a future version.
+FreeBSD is supported on 64-bit systems only. A process whose program cannot be named (a kernel process, which runs none, or a process whose program was replaced while it runs) falls back on its command name, which the kernel cuts to 19 characters.
 
 ## :straight_ruler: Reading the numbers
 
 Every counter in a `Sample` is in **microseconds**, on every system. Both loads run from `0.0` to `1.0` and are a share of the **whole machine**, not of one core: a process using all of one core of an eight core machine reads `0.125`, not `1.0`.
 
-**A negative load means it could not be read at all**: not running, stopped, or not allowed to get the information needed. That is not the same as `0.0`, which means no CPU time used at all.
+**A negative load means it could not be read at all**: not running (a process that has ended but is not yet cleaned up by the system counts as not running), or not allowed to get the information needed. That is not the same as `0.0`, which means no CPU time used at all.
 
-For an application, a process that could not be read is left out of the sum, so the figure is short by what it used. The answer is negative only when some of the application's processes are running and none of them would say anything at all. An application that is not running reads `0.0`. A process of the application that ends between two samples takes all of its time out of the second one, so that stretch reads low, or `0.0`.
+For an application, a process that could not be read is left out of the sum, so the figure is short by what it used. The answer is negative only when some of the application's processes are running and none of them would say anything at all. An application that is not running reads `0.0`. A process of the application that ends between two samples takes all of its time out of the second one, so that stretch reads low, or `0.0`. A process that starts and ends between two samples is never seen: an application made of short-lived processes, such as a compiler during a build, reads close to `0.0`.
 
-The library keeps has state. Linked statically into an Ada program, it can be called from any number of tasks. The shared library must be called from one thread or task at a time, whatever the language: it carries its own Ada runtime without tasking, which has a single working stack for the whole process. A sample is a plain record either way, so it can be taken in one thread and compared in another.
+On Linux and macOS the library keeps no state: linked statically into an Ada program, it can be called from any number of tasks. On Windows and FreeBSD it keeps the list of processes between samples, so a program that samples an application there must call the library from one task at a time. The shared library must be called from one thread or task at a time, whatever the language: it carries its own Ada runtime without tasking, which has a single working stack for the whole process. A sample is a plain record either way, so it can be taken in one thread and compared in another.
 
 ## Building
 
@@ -52,7 +59,9 @@ Or directly with GNAT:
 gprbuild -P cpuload.gpr
 ```
 
-The build produces a static library by default, and detects the system automatically: Linux, macOS and Windows are each recognised from the target gprbuild reports, so nothing has to be passed. `-XPJ_OS` still says which system to build for (`linux`, `macos` or `windows`) when it is not the one of the machine building it. A library built for another system reads no counters at all and reports 0% for everything.
+On FreeBSD, build with GNAT 15 or newer: `pkg install gprbuild gnat15`, then add `/usr/local/gnat15/bin` to `PATH`. GNAT 12, which `pkg install gprbuild` uses, ignores the pragma that keeps the shared library away from the signal handlers of the program loading it. Alire takes the GNAT in `PATH` there too, and refuses an older one.
+
+The build produces a static library by default, and detects the system automatically: Linux, macOS, Windows and FreeBSD are each recognised from the target gprbuild reports, so nothing has to be passed. `-XPJ_OS` still says which system to build for (`linux`, `macos`, `windows` or `freebsd`) when it is not the one of the machine building it. A library built for another system reads no counters at all and reports 0% for everything.
 
 For other library types (shared, etc.), set `-XCPULOAD_LIBRARY_TYPE`:
 
@@ -60,7 +69,7 @@ For other library types (shared, etc.), set `-XCPULOAD_LIBRARY_TYPE`:
 gprbuild -P cpuload.gpr -XCPULOAD_LIBRARY_TYPE=relocatable
 ```
 
-`relocatable` builds the shared library (`libcpuload.so` / `.dll` / `.dylib`) that carries the C interface and is standalone: it starts itself up when loaded. On Linux and Windows it is encapsulated as well, carrying the Ada runtime with it, so it is one self-contained file. On macOS it cannot be encapsulated, so the Ada runtime is a separate file: the library records the folder of the runtime of the compiler that built it, and loads it from there with nothing to set (no `DYLD_LIBRARY_PATH`, so it also works under `sudo` and from the system's Python).
+`relocatable` builds the shared library (`libcpuload.so` / `.dll` / `.dylib`) that carries the C interface and is standalone: it starts itself up when loaded. On Linux, FreeBSD and Windows it is encapsulated as well, carrying the Ada runtime with it, so it is one self-contained file. On macOS it cannot be encapsulated, so the Ada runtime is a separate file: the library records the folder of the runtime of the compiler that built it, and loads it from there with nothing to set (no `DYLD_LIBRARY_PATH`, so it also works under `sudo` and from the system's Python).
 
 ## Using from Ada
 
@@ -87,7 +96,7 @@ begin
 end Measure;
 ```
 
-The whole interface is `Sample`, the three `Take` functions (the system alone, one `Process_ID`, or an application by name).
+The whole interface is `Sample`, the five `Take` functions (the system alone, one `Process_ID` or an application by name, the last two also against a machine sample already taken), and the two usage functions `System_Usage` and `Process_Usage`.
 
 To follow several things at once, read the machine once and measure each of them against that one reading. Each is then measured over exactly the same period of time, and the machine's counters are read once instead of once per thing:
 
@@ -106,7 +115,7 @@ gprbuild -P example/example.gpr -p
 
 A number after the name stops it after that many readings (`""` follows no application), which is what the CI runs: `./example/example_cpu_load "" 3`.
 
-The counters need no particular rights on any of the three systems. When the machine reads nothing at all, the example says what to look into on the system it was built for.
+The counters need no particular rights on any system. When the machine reads nothing at all, the example says what to look into on the system it was built for.
 
 With Alire, add the library to your project with `alr with cpuload`.
 
@@ -142,6 +151,8 @@ A full example program is in [example/c/main.c](example/c/main.c). Like the Ada 
 ```bash
 make -C example/c run APP=firefox
 ```
+
+On FreeBSD, the Makefile needs GNU make: run `gmake` instead of `make`.
 
 To build it by hand instead, from the root of the repository, first compile the library:
 
@@ -199,7 +210,7 @@ Each OS has its own body of [src/cpu_load-platform.ads](src/cpu_load-platform.ad
 - `Runs`: whether a process runs the program an application is named by
 - `For_Each_Process`: every process running
 
-One body per OS lives in [src/linux](src/linux/cpu_load-platform.adb), [src/macos](src/macos/cpu_load-platform.adb) and [src/windows](src/windows/cpu_load-platform.adb), and [cpuload.gpr](cpuload.gpr) picks the folder for the OS being built from the `PJ_OS` symbol.
+One body per OS lives in [src/linux](src/linux/cpu_load-platform.adb), [src/macos](src/macos/cpu_load-platform.adb), [src/windows](src/windows/cpu_load-platform.adb) and [src/freebsd](src/freebsd/cpu_load-platform.adb), and [cpuload.gpr](cpuload.gpr) picks the folder for the OS being built from the `PJ_OS` symbol.
 
 To support a new OS, write a body of `CPU_Load.Platform` for it and add its folder there.
 

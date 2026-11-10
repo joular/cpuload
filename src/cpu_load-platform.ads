@@ -9,7 +9,7 @@
 --  Author : Adel Noureddine
 --
 
--- The OS-specific part of CPU Load: one body per OS in src/linux, src/macos and src/windows, picked by PJ_OS in cpuload.gpr
+-- The OS-specific part of CPU Load: one body per OS in src/linux, src/macos, src/windows and src/freebsd, picked by PJ_OS in cpuload.gpr
 -- To support a new OS, write a body of this package for it, and nothing else
 -- All times are in microseconds, and no function here raises an exception
 private package CPU_Load.Platform is
@@ -20,7 +20,7 @@ private package CPU_Load.Platform is
     -- Busy and Total of the whole machine, Used left at 0; all zeros if the counters cannot be read
     function Measure_System return Sample;
 
-    -- CPU time of one process; Not_Read if it does not exist, has stopped, or the OS will not let this user look at it
+    -- CPU time of one process; Not_Read if it does not exist, has ended (even before the system cleans it up), or the OS will not let this user look at it
     function Used_By_PID (PID : in Process_ID) return Integer_64;
 
     -- Whether the process runs the program named App, by the rule of this OS (see Take (App) in CPU_Load); False if its program cannot be found

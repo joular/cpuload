@@ -173,7 +173,8 @@ package body CPU_Load.Platform is
                                       Kernel'Access, User'Access);
         Close_Handle (Process);
 
-        if Success = 0 then
+        -- A process that has ended stays open to queries while a handle to it is held. Its exit time, zero until then, gives it away
+        if Success = 0 or else To_Microseconds (Finished) /= 0 then
             return Not_Read;
         end if;
 
@@ -206,28 +207,35 @@ package body CPU_Load.Platform is
 
     PID_Bytes : constant := DWORD'Size / 8;
 
+    -- Kept between samples, grown when full
+    PIDs : PID_List_Access := null;
+
     function For_Each_Process (Action : not null access procedure (PID : in Process_ID))
         return Boolean is
-        Capacity : Positive := First_Capacity;
-        PIDs : PID_List_Access;
         Room : DWORD;
         Filled : aliased DWORD := 0;
         Success : BOOL;
     begin
+        if PIDs = null then
+            PIDs := new PID_List (1 .. First_Capacity);
+        end if;
+
         -- A full list may be truncated, so retry with twice the room
         loop
-            PIDs := new PID_List (1 .. Capacity);
-            Room := DWORD (Capacity * PID_Bytes);
+            Room := DWORD (PIDs'Length * PID_Bytes);
             Success := Enum_Processes (PIDs (1)'Address, Room, Filled'Access);
 
-            exit when Success = 0 or else Filled < Room or else Capacity >= Max_Capacity;
+            exit when Success = 0 or else Filled < Room or else PIDs'Length >= Max_Capacity;
 
-            Free (PIDs);
-            Capacity := Capacity * 2;
+            declare
+                Bigger : constant Positive := PIDs'Length * 2;
+            begin
+                Free (PIDs);
+                PIDs := new PID_List (1 .. Bigger);
+            end;
         end loop;
 
         if Success = 0 then
-            Free (PIDs);
             return False;
         end if;
 
@@ -238,12 +246,9 @@ package body CPU_Load.Platform is
             end if;
         end loop;
 
-        Free (PIDs);
         return True;
     exception
         when others =>
-            -- Free of null is a no-op
-            Free (PIDs);
             return False;
     end For_Each_Process;
 

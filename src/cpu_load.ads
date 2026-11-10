@@ -10,8 +10,10 @@
 --
 
 -- CPU Load reports the CPU usage of the system, of one process, or of an application (all of its processes running when each sample is taken)
--- Works on Linux, macOS and Windows
--- It keeps no state. Linked statically, it can be called from any number of Ada tasks. The shared library must be called from one thread or task at a time (see include/cpuload.h)
+-- Works on Linux, macOS, Windows and FreeBSD
+-- Linked statically, it can be called from any number of Ada tasks on Linux and macOS, where it keeps no state
+-- Windows and FreeBSD keep the list of processes between samples: once an application is sampled there, call it from one task at a time
+-- The shared library must be called from one thread or task at a time (see include/cpuload.h)
 -- Take a sample, wait, take another, compare:
 --     Before := Take ("firefox");
 --     delay 1.0;
@@ -48,7 +50,8 @@ package CPU_Load is
 
     -- Sample the system and every process of an application
     -- App is the program's name without its folders, matched exactly, case-insensitive; "" samples the system alone
-    -- Linux and macOS match the program the process runs: "firefox" matches every process of Firefox, and the firefox inside Firefox.app
+    -- Linux, macOS and FreeBSD match the program the process runs: "firefox" matches every process of Firefox
+    -- macOS also matches every program inside Firefox.app, as its content processes run from a helper bundle in it
     -- Windows also ignores a trailing ".exe"
     -- A process that ends between two samples takes its time out of the second one, so that stretch reads low, or 0.0
     function Take (App : in String) return Sample;
@@ -64,11 +67,11 @@ package CPU_Load is
     function System_Usage (Before, After : in Sample) return Long_Float;
 
     -- CPU load of the process or application between two samples, 0.0 .. 1.0
-    -- Negative if it could not be read at all: not running, stopped, or the OS will not say. 0.0 is a real reading of no CPU time
+    -- Negative if it could not be read at all: not running (or ended and not yet cleaned up), or the OS will not say. 0.0 is a real reading of no CPU time
     -- An application that is not running reads 0.0; negative only when none of its running processes could be read
     function Process_Usage (Before, After : in Sample) return Long_Float;
 
     -- Keep it the same as the version in alire.toml
-    function Version return String is ("0.0.4");
+    function Version return String is ("0.1.0");
 
 end CPU_Load;
