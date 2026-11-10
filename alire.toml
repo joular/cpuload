@@ -17,17 +17,7 @@ licenses = "LGPL-3.0-only"
 website = "https://www.noureddine.org/research/joular/cpuload"
 
 [gpr-externals]
-PJ_OS = ["linux", "windows", "macos", "freebsd"]
 CPULOAD_LIBRARY_TYPE = ["static", "relocatable", "static-pic"]
-
-[gpr-set-externals."case(os)".linux]
-PJ_OS = "linux"
-[gpr-set-externals."case(os)".windows]
-PJ_OS = "windows"
-[gpr-set-externals."case(os)".macos]
-PJ_OS = "macos"
-[gpr-set-externals."case(os)".freebsd]
-PJ_OS = "freebsd"
 
 [available.'case(os)']
 linux = true

@@ -6,13 +6,13 @@ library project CpuLoad is
     Host_OS := external ("OS", "");
     Default_OS := "linux";
 
-    -- The names are the canonical ones of gprconfig
+    -- The names are the canonical ones of gprconfig, plus aarch64-linux-gnu, which the gprbuild of Debian 12 and Ubuntu 22.04 reports
     case Host_Target is
         when "x86_64-windows" | "x86-windows"
             => Default_OS := "windows";
         when "aarch64-darwin" | "x86_64-darwin" | "x86-darwin"
             => Default_OS := "macos";
-        when "x86_64-linux" | "aarch64-linux" | "arm-linux" | "armhf-linux" | "x86-linux"
+        when "x86_64-linux" | "aarch64-linux" | "aarch64-linux-gnu" | "arm-linux" | "armhf-linux" | "x86-linux"
             => Default_OS := "linux";
         when "x86_64-freebsd" | "aarch64-freebsd"
             => Default_OS := "freebsd";

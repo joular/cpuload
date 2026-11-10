@@ -159,6 +159,7 @@ package body CPU_Load.Platform is
         -- First line of /proc/stat, in ticks over all cores:
         -- cpu  user nice system idle iowait irq softirq steal guest guest_nice
         -- guest and guest_nice are already inside user and nice
+        -- steal is the time a virtual machine waited for its host: no work of this machine, so idle
         Line : constant String := First_Line ("/proc/stat");
         Busy : Integer_64;
         Idle : Integer_64;
@@ -171,11 +172,11 @@ package body CPU_Load.Platform is
               + Field (Line, 3)     -- nice
               + Field (Line, 4)     -- system
               + Field (Line, 7)     -- irq
-              + Field (Line, 8)     -- softirq
-              + Field (Line, 9);    -- steal
+              + Field (Line, 8);    -- softirq
 
         Idle := Field (Line, 5)     -- idle
-              + Field (Line, 6);    -- iowait
+              + Field (Line, 6)     -- iowait
+              + Field (Line, 9);    -- steal
 
         return (Busy => Busy * Microseconds_Per_Tick,
                 Total => (Busy + Idle) * Microseconds_Per_Tick,

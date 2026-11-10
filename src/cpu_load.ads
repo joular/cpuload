@@ -11,7 +11,9 @@
 
 -- CPU Load reports the CPU usage of the system, of one process, or of an application (all of its processes running when each sample is taken)
 -- Works on Linux, macOS, Windows and FreeBSD
--- It keeps no state. Linked statically, it can be called from any number of Ada tasks. The shared library must be called from one thread or task at a time (see include/cpuload.h)
+-- Linked statically, it can be called from any number of Ada tasks on Linux and macOS, where it keeps no state
+-- Windows and FreeBSD keep the list of processes between samples: once an application is sampled there, call it from one task at a time
+-- The shared library must be called from one thread or task at a time (see include/cpuload.h)
 -- Take a sample, wait, take another, compare:
 --     Before := Take ("firefox");
 --     delay 1.0;

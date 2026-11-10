@@ -14,7 +14,7 @@ Detailed documentation (including user and reference guides) is available at: [h
 
 | What is measured | OS | Method |
 |---|---|---|
-| The whole system | Linux | The `cpu` line of `/proc/stat` |
+| The whole system | Linux | The `cpu` line of `/proc/stat`; waiting for I/O, and time stolen by the host of a virtual machine, count as idle |
 | The whole system | macOS | `host_statistics`, macOS' CPU counters |
 | The whole system | Windows | `GetSystemTimes` |
 | The whole system | FreeBSD | `kern.cp_time` through `sysctl` |
@@ -27,7 +27,7 @@ Detailed documentation (including user and reference guides) is available at: [h
 | An application, every process of it | Windows | `EnumProcesses` + `QueryFullProcessImageNameW` |
 | An application, every process of it | FreeBSD | `kern.proc` listed, each process named by `kern.proc.pathname` |
 
-Every OS matches the program with the process that actually runs, so `firefox` finds every process of Firefox, its content processes included. On macOS that is the program inside the bundle, so `firefox` finds the application inside `Firefox.app`, and also every program inside `Firefox.app`: for example, its content processes run `plugin-container`, from a helper bundle inside it. On Windows a trailing `.exe` is ignored, so `firefox` also finds `firefox.exe`.
+Every OS matches the program with the process that actually runs, so `firefox` finds every process of Firefox, its content processes included. On macOS that is the program inside the bundle, so `firefox` finds the application inside `Firefox.app`, and also every program inside `Firefox.app`: for example, its content processes run `plugin-container`, from a helper bundle inside it. On Windows a trailing `.exe` is ignored, so `firefox` also finds `firefox.exe`. The name is the one of the program file itself, after any link is followed: where `python3` is a link to `python3.12`, the application to ask for is `python3.12`.
 
 On Linux, a process whose `/proc/<pid>/exe` cannot be read (such as a kernel thread, which runs no program directly, or another user's process) falls back on `/proc/<pid>/comm`. This file holds the name the process gave itself, 15 characters at most.
 
@@ -41,9 +41,9 @@ Every counter in a `Sample` is in **microseconds**, on every system. Both loads 
 
 **A negative load means it could not be read at all**: not running (a process that has ended but is not yet cleaned up by the system counts as not running), or not allowed to get the information needed. That is not the same as `0.0`, which means no CPU time used at all.
 
-For an application, a process that could not be read is left out of the sum, so the figure is short by what it used. The answer is negative only when some of the application's processes are running and none of them would say anything at all. An application that is not running reads `0.0`. A process of the application that ends between two samples takes all of its time out of the second one, so that stretch reads low, or `0.0`.
+For an application, a process that could not be read is left out of the sum, so the figure is short by what it used. The answer is negative only when some of the application's processes are running and none of them would say anything at all. An application that is not running reads `0.0`. A process of the application that ends between two samples takes all of its time out of the second one, so that stretch reads low, or `0.0`. A process that starts and ends between two samples is never seen: an application made of short-lived processes, such as a compiler during a build, reads close to `0.0`.
 
-The library keeps no state. Linked statically into an Ada program, it can be called from any number of tasks. The shared library must be called from one thread or task at a time, whatever the language: it carries its own Ada runtime without tasking, which has a single working stack for the whole process. A sample is a plain record either way, so it can be taken in one thread and compared in another.
+On Linux and macOS the library keeps no state: linked statically into an Ada program, it can be called from any number of tasks. On Windows and FreeBSD it keeps the list of processes between samples, so a program that samples an application there must call the library from one task at a time. The shared library must be called from one thread or task at a time, whatever the language: it carries its own Ada runtime without tasking, which has a single working stack for the whole process. A sample is a plain record either way, so it can be taken in one thread and compared in another.
 
 ## Building
 

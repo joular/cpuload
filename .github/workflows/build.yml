@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Use Alire for the GNAT toolchain, and picking PJ_OS for the system it runs on
+      # Use Alire for the GNAT toolchain; cpuload.gpr picks the OS from the target
       - uses: alire-project/setup-alire@v6
 
       # cpuload_version() is a public C API, check for version mismatch with alire.toml
